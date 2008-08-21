@@ -37,7 +37,7 @@ class Codes
     :alpha_lower => ['a'..'z'],
     :alpha       => [:alpha_upper, :alpha_lower],
 
-    :symbol      => %q{!"$%&/()=?.,:;-_#'+*<>},
+    :symbol      => %q{@!"#$%&'()*:+;[\{,<|-=]\}.>^~/?_},
     :sym         => :symbol,
 
     :binary      => [0..1],
@@ -185,7 +185,7 @@ class Codes
       if count
         (0...count).map { pick }
       else
-        at(rand(pool_size - 1))
+        at(rand(pool_size))
       end
     end
   end
