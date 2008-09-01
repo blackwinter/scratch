@@ -64,7 +64,9 @@ class ModWhich
         @load_order << mod
         current_paths = loaded_paths
 
-        ret = _modwhich_original_require(mod)
+        ret = recursive_verbose(verbose) {
+          _modwhich_original_require(mod)
+        }
 
         @added_paths.concat(loaded_paths - current_paths)
         @which[mod] = @added_paths.pop || gemwhich(mod)
@@ -85,6 +87,21 @@ class ModWhich
 
     def recursive?
       @recursive
+    end
+
+    def recursive_verbose?(verbose)
+      recursive? && !verbose.nil? && verbose != verbose?
+    end
+
+    def recursive_verbose(verbose)
+      recursive_verbose = recursive_verbose?(verbose)
+      self.verbose = verbose if recursive_verbose
+
+      ret = yield
+
+      self.verbose = !verbose if recursive_verbose
+
+      ret
     end
 
     def include?(mod)
@@ -156,10 +173,9 @@ if $0 == __FILE__
 
   abort usage if help || ARGV.empty?
 
-  ModWhich.verbose = verbose
   ModWhich.init(ARGV, recursive)
 
-  ARGV.each { |mod| require mod }
+  ARGV.each { |mod| require mod, verbose }
 else
   ModWhich.init
 end
@@ -167,5 +183,5 @@ end
 at_exit {
   ModWhich.each { |mod, path|
     warn "require '#{mod}' => #{path || 'NOT FOUND'}"
-  } unless ModWhich.verbose?
+  } unless verbose || ModWhich.verbose?
 }
