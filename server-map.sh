@@ -17,7 +17,7 @@ if [ "$name" = "$real" ]; then
   for i in "${map[@]}"; do
     j=(${i//:/ })
 
-    for k in "+" "2" "cp2"; do
+    for k in "+" "-" "2" "cp2"; do
       l="${k}${j[0]}"
 
       if [ -e "$l" ]; then
@@ -32,7 +32,7 @@ if [ "$name" = "$real" ]; then
         fi
       else
         echo "+ $l -> $name"
-        ln -s $name $l
+        ln -s -- $name $l
       fi
     done
   done
@@ -56,16 +56,18 @@ else
       mnt="$HOME/mnt/$base"
       [ ! -d "$mnt" ] && echo "no mount point for $base" && exit 1
 
-      if [ "$1" = "-u" ]; then
-        echo "unmounting $user@$host..."
-        fusermount -u "$mnt"
-      else
-        echo "mounting $user@$host..."
-        sshfs -o sshfs_sync,cache_timeout=5 "$user@$host:/" "$mnt"
+      echo "mounting $mnt [$user@$host]..."
+      sshfs -o sshfs_sync,transform_symlinks,cache_timeout=5 "$user@$host:/" "$mnt"
 
-        home="$mnt/home/$user"
-        [ -d "$home" ] && echo "> $home" || echo "> $mnt"
-      fi
+      home="$mnt/home/$user"
+      [ -d "$home" ] && echo "> $home"
+      ;;
+    -* )
+      mnt="$HOME/mnt/$base"
+      [ ! -d "$mnt" ] && echo "no mount point for $base" && exit 1
+
+      echo "unmounting $mnt [$user@$host]..."
+      fusermount -u "$mnt"
       ;;
     2* )
       echo "$user@$host"
