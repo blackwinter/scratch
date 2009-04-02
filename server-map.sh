@@ -37,7 +37,7 @@ if [ "$name" = "$real" ]; then
     done
   done
 else
-  base="${name/#@(+|2|cp2)/}"
+  base="${name/#@(+|-|2|cp2)/}"
 
   # connect to host
   for i in ${map[@]}; do
