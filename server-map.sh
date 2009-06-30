@@ -22,7 +22,7 @@ if [ "$name" = "$real" ]; then
 
       if [ -e "$l" ]; then
         if [ -h "$l" ]; then
-          if [ "$(readlink "$l")" = "$name" ]; then
+          if [ "$(readlink -- "$l")" = "$name" ]; then
             echo "= $l is a symbolic link, already pointing to $name"
           else
             echo "! $l is a symbolic link, but doesn't point to $name"
