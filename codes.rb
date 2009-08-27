@@ -549,4 +549,4 @@ if $0 == __FILE__ || %w[spec rcov].include?(File.basename($0))
 end
 # }}}
 
-# vi:foldmethod=marker
+# vim:fdm=marker:fen

@@ -2,9 +2,20 @@
 
 # server-map: short-cuts to ssh to, scp from/to, or ssh-mount remote hosts
 
-map=(
-  #name:host:user
-)
+# server.map:
+#
+#   map=(
+#     name:host:user
+#     ...
+#   )
+mapf="$(dirname "$0")/server.map"
+[ ! -r "$mapf" ] && echo "map file not found: $mapf" && exit 1
+
+# protect from manipulation ;-)
+readonly mapf
+
+source "$mapf"
+[ -z "${map[*]}" ] && echo "no server map provided: $mapf" && exit 1
 
 real="server-map.sh"
 name="$(basename $0)"

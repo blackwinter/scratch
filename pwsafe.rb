@@ -283,4 +283,4 @@ rescue StandardError => err
 end
 # }}}
 
-# vi:foldmethod=marker
+# vim:fdm=marker:fen
