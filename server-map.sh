@@ -81,7 +81,7 @@ else
       fusermount -u "$mnt"
       ;;
     2* )
-      echo "$user@$host"
+      echo "$user@$host" >&2
       ssh -l $user $host $*
       ;;
     cp2* )
