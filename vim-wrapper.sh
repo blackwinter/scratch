@@ -6,6 +6,8 @@ real="$(type -ap "$name" | head -2 | tail -1)"
 [ -z "$real" ] && echo "command not found: $name" && exit 1
 [ ! -x "$real" ] && echo "command not executable: $real" && exit 1
 
+[ $BASH_VERSINFO -lt 3 ] && exec $real "$@"
+
 args=""
 plus=""
 
