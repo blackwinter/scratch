@@ -37,9 +37,6 @@ require 'digest/sha2'
 require 'rubygems'
 require 'highline'
 
-USAGE = "Usage: #{$0} [-h|--help] [options] <file> [<realm>]"
-abort USAGE if ARGV.empty?
-
 # {{{ class Safe
 class Safe
 
@@ -198,6 +195,12 @@ class Safe
 end
 # }}}
 
+# {{{ APPCODE
+if $0 == __FILE__
+
+USAGE = "Usage: #{$0} [-h|--help] [options] <file> [<realm>]"
+abort USAGE if ARGV.empty?
+
 # {{{ options
 options = {}
 
@@ -239,7 +242,6 @@ OptionParser.new { |opts|
 abort USAGE unless (1..2).include?(ARGV.size)
 # }}}
 
-# {{{ APPCODE
 begin
   file   = File.expand_path(ARGV.shift)
   pwsafe = Safe.new(file, options[:create])
@@ -280,6 +282,8 @@ rescue Safe::SafeError
   exit
 rescue StandardError => err
   abort err
+end
+
 end
 # }}}
 
