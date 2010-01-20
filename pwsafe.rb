@@ -137,7 +137,7 @@ class Safe
     cipher.key = Digest::SHA256.hexdigest(key)
 
     cipher << content << cipher.final
-  rescue OpenSSL::CipherError
+  rescue OpenSSL::Cipher::CipherError
     raise CryptError
   end
 
