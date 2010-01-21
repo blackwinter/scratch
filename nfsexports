@@ -1,0 +1,26 @@
+#! /usr/bin/ruby
+
+abort unless File.readable?('/etc/exports')
+
+exports = Hash.new { |h, k| h[k] = [] }
+
+File.foreach('/etc/exports') { |line|
+  next if line =~ /\A\s*(?:#|\z)/
+
+  dir, *hosts = line.split
+
+  hosts.each { |host_with_opts|
+    host_with_opts =~ /(.*)\((.*)\)/
+    exports[dir] << [$1, $2.split(/,/)]
+  }
+}
+
+exports.sort.each { |dir, hosts|
+  puts dir
+
+  hosts.sort.each { |host, opts|
+    puts "  - #{host}: #{opts.sort.join(', ')}"
+  }
+
+  puts
+}

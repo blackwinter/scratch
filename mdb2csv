@@ -1,0 +1,45 @@
+#! /bin/bash
+
+[ -z "$1" ] && echo "usage: $0 [options] <mdb-files> ..." && exit 1
+
+while [ -n "$1" ]; do
+  m="$1"; shift
+
+  case "$m" in
+    -f )
+      f="$1"; shift
+      ;;
+    -t )
+      t="$1"; shift
+      ;;
+    * )
+      if [ -n "$f" ]; then
+        if [ -n "$t" ]; then
+          a="-f $f -t $t"
+        else
+          a="-f $f"
+        fi
+      else
+        if [ -n "$t" ]; then
+          a="-t $t"
+        else
+          a=""
+        fi
+      fi
+
+      echo "$m [$a]"
+
+      for b in $(mdb-tables "$m"); do
+        o="$(dirname "$m")/$(basename "$m" .mdb)-$b.csv"
+
+        echo "- $b: $o"
+
+        if [ -n "$a" ]; then
+          mdb-export "$m" "$b" | iconv $a > "$o"
+        else
+          mdb-export "$m" "$b" > "$o"
+        fi
+      done
+      ;;
+  esac
+done

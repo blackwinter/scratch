@@ -1,0 +1,35 @@
+#! /usr/bin/ruby
+
+$KCODE = 'u'
+
+require 'rubygems'
+require 'fastercsv'
+
+abort "usage: #{$0} <csv> ..." if ARGV.empty?
+
+# <http://www.w3.org/TR/2006/REC-xml-20060816/#NT-Name>
+ELEMENT_START = %r{^[a-zA-Z_:]}
+ELEMENT_CHARS = %q{\w:.-}
+
+puts '<root>'
+
+ARGV.each { |f|
+  puts
+  puts "<!-- #{f} -->"
+  puts
+
+  FasterCSV.foreach(f, :headers => true) { |row|
+    puts '<row>'
+
+    row.each { |field, value|
+      field.insert(0, '_') unless field =~ ELEMENT_START
+      field.gsub!(/[^#{ELEMENT_CHARS}]/, '_')
+
+      puts '  <%s>%s</%s>' % [field, value, field]
+    }
+
+    puts '</row>'
+  }
+}
+
+puts '</root>'

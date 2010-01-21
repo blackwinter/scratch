@@ -1,0 +1,24 @@
+#! /usr/bin/ruby
+
+imports = Hash.new { |h, k| h[k] = [] }
+
+File.foreach('/etc/fstab') { |line|
+  next if line =~ /\A\s*(?:#|\z)/
+
+  dev, mnt, type, opts, _ = line.split
+  next unless type == 'nfs'
+
+  host, dir = dev.split(/:/, 2)
+
+  imports[host] << [dir, mnt, opts.split(/,/)]
+}
+
+imports.sort.each { |host, dirs|
+  puts host
+
+  dirs.sort.each { |dir, mnt, opts|
+    puts "  - #{dir} @ #{mnt}: #{opts.sort.join(', ')}"
+  }
+
+  puts
+}
