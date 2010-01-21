@@ -1,0 +1,17 @@
+#! /bin/bash
+
+[ "`id -u`" -ne 0 ] && sudo="sudo"
+
+function step() {
+  read -ep "$1? (y/n) [y]: "
+  [ "$REPLY" = "n" ] && exit
+}
+
+step "Update Passenger"
+$sudo gem update passenger
+
+step "Install Apache 2 module"
+$sudo passenger-install-apache2-module
+
+step "Restart Apache"
+$sudo /etc/init.d/apache2 restart
