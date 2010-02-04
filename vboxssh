@@ -1,0 +1,69 @@
+#! /bin/bash
+
+[ $# -lt 1 ] && echo "Usage: $0 <name> [<user> [<port>]]" && exit 1
+
+name="$1"
+user="${2:-$USER}"
+port="${3:-2222}"
+
+drv="${VBOXDRV:-pcnet}"
+dev="${VBOXDEV:-ssh}"
+
+started=""
+modified=""
+
+function devkey() {
+  echo "VBoxInternal/Devices/$drv/0/LUN#0/Config/$dev/$1"
+}
+
+function getdev() {
+  VBoxManage getextradata "$name" "$(devkey "$1")" \
+    | awk '/^Value:/{print $2}'
+}
+
+function setdev() {
+  [ "$(getdev "$1")" = "$2" ] && return
+  VBoxManage setextradata "$name" "$(devkey "$1")" "$2"
+  modified=1
+}
+
+function vmrunning() {
+  VBoxManage showvminfo "$name" --machinereadable \
+    | grep -q 'VMState="running"'
+}
+
+function resetvm() {
+  VBoxManage controlvm "$name" reset
+}
+
+function startvm() {
+  VBoxManage startvm "$name" --type headless
+}
+
+function stopvm() {
+  VBoxManage controlvm "$name" acpipowerbutton
+}
+
+setdev HostPort  "$port"
+setdev GuestPort 22
+setdev Protocol  TCP
+
+if vmrunning; then
+  if [ -n "$modified" ]; then
+    read -ep "VM was modified: $name. Restart now? (y/n) [n]: "
+    [ "$REPLY" = "y" ] && resetvm && sleep 5
+  fi
+else
+  read -ep "VM not running: $name. Start now? (y/n) [y]: "
+  [ "$REPLY" = "n" ] && exit
+
+  startvm && sleep 5
+  started=1
+fi
+
+ssh -l "$user" -p "$port" localhost
+
+if [ -n "$started" ]; then
+  read -ep "VM was started: $name. Shutdown now? (y/n) [n]: "
+  [ "$REPLY" = "y" ] && stopvm && sleep 5
+fi
