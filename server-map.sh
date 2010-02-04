@@ -2,48 +2,53 @@
 
 # server-map: short-cuts to ssh to, scp from/to, or ssh-mount remote hosts
 
+function warn() {
+  [ -n "$1" ] && echo "$1" >&2
+}
+
+function die() {
+  warn "$1"
+  exit 1
+}
+
 # server.map:
 #
 #   map=(
 #     name:host:user
 #     ...
 #   )
-mapf="$(dirname "$0")/server.map"
-[ ! -r "$mapf" ] && echo "map file not found: $mapf" && exit 1
+mapfile="$(dirname "$0")/server.map"
+[ ! -r "$mapfile" ] && die "map file not found: $mapfile"
 
-# protect from manipulation ;-)
-readonly mapf
-
-source "$mapf"
-[ -z "${map[*]}" ] && echo "no server map provided: $mapf" && exit 1
+source "$mapfile"
+[ ${#map[*]} -eq 0 ] && die "no server map: $mapfile"
 
 real="server-map.sh"
-name="$(basename $0)"
+name="$(basename "$0")"
+
 shopt -s extglob
 
 if [ "$name" = "$real" ]; then
-  # create symlinks to ssh-to
-  cd $HOME/bin || exit 1
+  # create symlinks
+  cd "${1:-$HOME/bin}" || die
 
-  for i in "${map[@]}"; do
-    j=(${i//:/ })
+  for item in "${map[@]}"; do
+    entry=(${item//:/ })
 
-    for k in "+" "-" "2" "cp2"; do
-      l="${k}${j[0]}"
+    for prefix in "+" "-" "2" "cp2"; do
+      link="${prefix}${entry[0]}"
 
-      if [ -e "$l" ]; then
-        if [ -h "$l" ]; then
-          if [ "$(readlink -- "$l")" = "$name" ]; then
-            echo "= $l is a symbolic link, already pointing to $name"
-          else
-            echo "! $l is a symbolic link, but doesn't point to $name"
+      if [ -e "$link" ]; then
+        if [ -h "$link" ]; then
+          if [ "$(readlink -- "$link")" != "$name" ]; then
+            warn "! $link: not pointing to $name"
           fi
         else
-          echo "? $l exists, but is no symbolic link"
+          warn "? $link: not a symbolic link"
         fi
       else
-        echo "+ $l -> $name"
-        ln -s -- $name $l
+        warn "+ $link -> $name"
+        ln -s -- "$name" "$link"
       fi
     done
   done
@@ -51,58 +56,53 @@ else
   base="${name/#@(+|-|2|cp2)/}"
 
   # connect to host
-  for i in ${map[@]}; do
-    j=(${i//:/ })
-    [ "${j[0]}" = "$base" ] && break
+  for item in "${map[@]}"; do
+    entry=(${item//:/ })
+    [ "${entry[0]}" = "$base" ] && break
   done
 
-  host="${j[1]}"
-  user="${j[2]}"
+  host="${entry[1]}"
+  user="${entry[2]}"
 
-  [ -z "$host" ] && echo "no host name for $base" && exit 1
-  [ -z "$user" ] && echo "no user name for $base" && exit 1
+  [ -z "$host" ] && die "no host name: $base"
+  [ -z "$user" ] && die "no user name: $base"
 
   case "$name" in
     +* )
       mnt="$HOME/mnt/$base"
-      [ ! -d "$mnt" ] && echo "no mount point for $base" && exit 1
+      [ ! -d "$mnt" ] && die "no mount point: $base"
 
-      echo "mounting $mnt [$user@$host]..."
+      warn "mounting $mnt [$user@$host]..."
       sshfs -o sshfs_sync,transform_symlinks,cache_timeout=5 "$user@$host:/" "$mnt"
 
       home="$mnt/home/$user"
-      [ -d "$home" ] && echo "> $home"
+      [ -d "$home" ] && warn "> $home"
       ;;
     -* )
       mnt="$HOME/mnt/$base"
-      [ ! -d "$mnt" ] && echo "no mount point for $base" && exit 1
+      [ ! -d "$mnt" ] && die "no mount point: $base"
 
-      echo "unmounting $mnt [$user@$host]..."
+      warn "unmounting $mnt [$user@$host]..."
       fusermount -u "$mnt"
       ;;
     2* )
-      echo "$user@$host" >&2
-      ssh -l $user $host $*
+      warn "$user@$host"
+      ssh -l "$user" "$host" "$@"
       ;;
     cp2* )
-      [ -z "$1" ] && { scp --help; exit 1; }
+      [ -z "$1" ] && { scp --help; die; }
 
-      a=(); i=0
+      args=(); i=0
 
       while [ -n "$1" ]; do
-        # FIXME: quotes or no quotes...
-        #a[$i]='"'"${1/#:/$user@$host:}"'"'
-        a[$i]="${1/#:/$user@$host:}"
-        i=$((i+1)); shift
+        args[$i]="${1/#:/$user@$host:}"
+        ((i++)); shift
       done
 
-      scp ${a[*]}
+      scp "${args[@]}"
       ;;
     * )
-      echo "unknow command: $name"
-      exit 1
+      die "unknow command: $name"
       ;;
   esac
 fi
-
-# vim:ft=sh
