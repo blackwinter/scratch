@@ -1,5 +1,31 @@
 #! /bin/bash
 
+###############################################################################
+#                                                                             #
+# vboxssh -- Connect to your VirtualBox Guest OS via SSH                      #
+#                                                                             #
+# Copyright (C) 2010 University of Cologne,                                   #
+#                    Albertus-Magnus-Platz,                                   #
+#                    50932 Cologne, Germany                                   #
+#                                                                             #
+# Authors:                                                                    #
+#     Jens Wille <jens.wille@uni-koeln.de>                                    #
+#                                                                             #
+# vboxssh is free software; you can redistribute it and/or modify it under    #
+# the terms of the GNU General Public License as published by the Free        #
+# Software Foundation; either version 3 of the License, or (at your option)   #
+# any later version.                                                          #
+#                                                                             #
+# vboxssh is distributed in the hope that it will be useful, but WITHOUT ANY  #
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS   #
+# FOR A PARTICULAR PURPOSE. See the GNU General Public License for more       #
+# details.                                                                    #
+#                                                                             #
+# You should have received a copy of the GNU General Public License along     #
+# with vboxssh. If not, see <http://www.gnu.org/licenses/>.                   #
+#                                                                             #
+###############################################################################
+
 [ $# -lt 1 ] && echo "Usage: $0 <name> [<user> [<port>]]" && exit 1
 
 name="$1"
@@ -9,8 +35,8 @@ port="${3:-2222}"
 drv="${VBOXDRV:-pcnet}"
 dev="${VBOXDEV:-ssh}"
 
-started=""
 modified=""
+started=""
 
 function devkey() {
   echo "VBoxInternal/Devices/$drv/0/LUN#0/Config/$dev/$1"
@@ -23,6 +49,7 @@ function getdev() {
 
 function setdev() {
   [ "$(getdev "$1")" = "$2" ] && return
+
   VBoxManage setextradata "$name" "$(devkey "$1")" "$2"
   modified=1
 }
@@ -38,6 +65,7 @@ function resetvm() {
 
 function startvm() {
   VBoxManage startvm "$name" --type headless
+  started=1
 }
 
 function stopvm() {
@@ -58,7 +86,6 @@ else
   [ "$REPLY" = "n" ] && exit
 
   startvm && sleep 5
-  started=1
 fi
 
 ssh -l "$user" -p "$port" localhost
