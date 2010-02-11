@@ -1,0 +1,6 @@
+#! /bin/bash
+
+arg="$(echo $*)"
+rss="$(echo $(ps -C ${arg// /,} -o rss --no-headers))"
+
+echo $((($(echo "${rss// /+}")+0)/1024))
