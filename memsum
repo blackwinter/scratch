@@ -1,6 +1,13 @@
 #! /bin/bash
 
-arg="$(echo $*)"
-rss="$(echo $(ps -C ${arg// /,} -o rss --no-headers))"
+function sum() {
+  mem="$(echo $(ps -C ${1// /,} -o $2 --no-headers))"
+  echo $((($(echo "${mem// /+}")+0)/1024))
+}
 
-echo $(((${rss// /+}+0)/1024))
+arg="$(echo $*)"
+
+vsz="$(sum "$arg" vsz)"
+rss="$(sum "$arg" rss)"
+
+echo "$vsz $rss"
