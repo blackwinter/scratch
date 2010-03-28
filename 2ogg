@@ -1,0 +1,220 @@
+#! /bin/bash
+
+# 2ogg: convert any audio file to ogg using 'mplayer' / 2211205 - 7020406
+# (based on: <http://ubuntu.wordpress.com/2005/09/29/wma-to-ogg-file-conversion/>)
+
+# TODO:
+#
+# - skip vs. overwrite existing
+# - streams (alternative for realstreams: vsound -t -f WAV trplayer STREAM)
+
+LOG="2ogg_$(date +%Y%m%d-%H%M%S).log"
+JUK="juk"
+EXF="exiftool -s -s -s"
+MPD="audiodump.wav"  # dump file produced by mplayer
+MPA="-vc dummy -vo null -ao pcm:waveheader"
+MPL="mplayer $MPA"
+OGE="oggenc"
+TIM="date +%s"
+HMS='$x=$ARGV[0]; $s=$x%60; $x-=$s; $x/=60; $m=$x%60; $x/=60; $h=$x%60; print "${h}h ${m}m ${s}s\n";'
+
+ERE="/dev/null"
+MRE="/dev/null"
+
+USAGE="usage: $0 [OPTIONS]... {DIR|FILES...}"
+HELP="\
+$USAGE
+2ogg: convert any audio file to ogg using 'mplayer'
+
+options:
+    -h       [help]                 display this help and exit
+    -v       [verbose]              be verbose (regards mplayer output)
+    -q       [quiet]                be quiet (minimal output)
+    -n       [no logfile]           don't write a logfile
+    -c       [current dir]          create ogg's in current directory (instead of original)
+    -d       [decode only]          only decode source files (no ogg's will be created)
+    -k       [keep wav]             keep wav files
+    -m DIR   [move to DIR]          move source files to DIR afterwards
+    -r       [remove]               remove source files afterwards (asks interactively)
+    -R       [remove -- don't ask]  just like '-r', but *don't* prompt before removal! (i'd be careful with that ;-)
+    -t       [transform]            transform/normalize file name
+    -j       [juk]                  run 'juk' afterwards (to add metadata to ogg's)
+"
+
+# exit immediately if a simple command exits with a non-zero status.
+set -e
+
+# enable extended pattern matching
+shopt -s extglob
+
+V=""; Q=""; C=""; D=""; K=""; M=""; R=""; I=""; T=""; J=""
+while getopts hvqncdkm:rRtj opt; do
+  case "$opt" in
+    h ) echo "$HELP"; exit 0;;
+    v ) V="1";;
+    q ) Q="1";;
+    n ) LOG="/dev/null";;
+    c ) C="1";;
+    d ) D="1";;
+    k ) K="1";;
+    m ) M="$OPTARG";;
+    r ) R="1"; I="-i";;
+    R ) R="1";;
+    t ) T="1";;
+    j ) J="1";;
+  esac
+done
+
+shift $(($OPTIND - 1))
+
+[ -z "$1" ] && echo "$USAGE" && exit 1
+
+[ ! -w "$PWD" ] && echo "current directory '$PWD' not writable!" && exit 1
+
+if [ -z "$Q" ]; then
+  ERE="/dev/stdout"
+  [ -n "$V" ] && MRE="/dev/stdout"
+fi
+
+if [ -n "$M" ]; then
+  if [ -e "$M" ]; then
+    [ ! -d "$M" ] && echo "not a directory '$M'!" && exit 1
+  else
+    mkdir -p "$M"
+  fi
+fi
+
+[ -n "$D" ] && J=""
+
+TS="$($TIM)"
+
+_do_action() {
+  [ ! -f "$file" ] && echo "can't find file '$file'! skipping..." && continue
+  [ ! -r "$file" ] && echo "can't read file '$file'! skipping..." && continue
+
+  ANY="$file"
+  DIR="$(dirname  "$ANY")"
+  BAS="$(basename "$ANY" | sed -e 's/\.[^.]\+$//')"
+  [ -n "$T" ] && BAS="$(echo "$BAS" | tr -d [!?´\`/:] | tr [:upper:] [:lower:] | sed -e 's/ \+/_/g' | sed -e "s/'\{2,\}//g")"
+  if [ -n "$C" ]; then
+    OGG="${BAS}.ogg"
+    WAV="${BAS}.wav"
+  else
+    OGG="${DIR}/${BAS}.ogg"
+    WAV="${DIR}/${BAS}.wav"
+  fi
+
+  k=0
+  while [ -e "$OGG" ]; do
+    k=$(($k + 1))
+    OGG="${OGG/?(-+([0-9])).ogg/-$k.ogg}"
+  done
+
+  i=$(($i + 1))
+
+  echo "##########################################################################################" > $ERE
+  echo "$i/$N converting '$ANY' to '$OGG'... [$($EXF -FileSize "$ANY")]"
+
+  # dump audio to wav (file: audiodump.wav)
+  if [ "${ANY##*.}" != "wav" ]; then
+    $MPL "$ANY" &> $MRE
+
+    k=0
+    while [ -e "$WAV" ]; do
+      k=$(($k + 1))
+      WAV="${WAV/?(-+([0-9])).wav/-$k.wav}"
+    done
+
+    if [ -e "$MPD" ]; then
+      mv "$MPD" "$WAV"
+    else
+      j=$(($j + 1))
+      echo "DECODE ERROR: '$ANY'! skipping..."
+      echo "DERR $ANY" >> $LOG
+      continue
+    fi
+  fi
+
+  # decode only?
+  [ -n "$D" ] && continue
+
+  echo > $ERE
+
+  # get file specifications
+  FB="$($EXF -BitsPerSample "$WAV")"
+  FC="$($EXF -NumChannels   "$WAV")"
+  FR="$($EXF -SampleRate    "$WAV")"
+
+  RAW=""
+  if [ -n "$FB" -a "$FB" != "-" ]; then
+    if [ $FB -lt 16 ]; then
+      echo -e "raw input!\nbits:       $FB\nchannels:   $FC\nsamplerate: $FR\n" > $ERE
+      FB=16
+      RAW="-r -B $FB -C $FC -R $FR"
+    fi
+  fi
+
+  # get mp3 metadata
+  if $EXF "$ANY" &> /dev/null; then
+    # from exiftool
+    MA="$($EXF -Artist "$ANY")"
+    ML="$($EXF -Album  "$ANY")"
+    MT="$($EXF -Title  "$ANY")"
+    MG="$($EXF -Genre  "$ANY")"
+    MY="$($EXF -Year   "$ANY")"
+  else
+    # guess from filename
+    eval NAME=($(echo "$(echo "$ANY" | sed 's/[()]/\\&/g')" | tr _ " " | sed 's/\b\(.\)/\u\1/g; s/\('"'"'\)\(.\)/\1\l\2/g; s/^\(.*\) - \(.*\)\.[^.]\+$/"\1" "\2"/'))
+    MA="${NAME[0]}"
+    ML=""
+    MT="${NAME[1]}"
+    MG=""
+    MY=""
+  fi
+
+  # encode to ogg
+  $OGE $RAW -a "$MA" -l "$ML" -t "$MT" -G "$MG" -d "$MY" -o "$OGG" "$WAV" &> $ERE
+
+  if [ -e "$OGG" ]; then
+    echo "SUCC $ANY" >> $LOG
+  else
+    j=$(($j + 1))
+    echo "ENCODE ERROR: '$ANY'! skipping..."
+    echo "EERR $ANY" >> $LOG
+    continue
+  fi
+
+  [ -z "$K" ] && [ "${ANY##*.}" != "wav" ] && rm -f "$WAV"
+
+  if [ -n "$M" ]; then
+    mv -i "$ANY" "$M"
+  else
+    [ -n "$R" ] && rm $I "$ANY"
+  fi
+
+  OGS=("${OGS[@]}" "$OGG")
+}
+
+_find_mp3() {
+  find "$1" -type f -iname "*.mp3" | sort
+}
+
+OGS=(); i=0; j=0
+if [ -d "$1" ]; then
+  N="$(_find_mp3 "$1" | wc -l | awk '{print $1}')"
+  _find_mp3 "$1" | while read file; do
+    _do_action
+  done
+else
+  N=${#@}
+  for file in "$@"; do
+    _do_action
+  done
+fi
+
+TE="$($TIM)"; touch $LOG
+echo "[$(perl -e "$HMS" $(($TE - $TS)))] finished -- $j ERRORS (logfile was '$LOG')"
+
+[ -n "$J" ] && $JUK "${OGS[@]}" &
+
+exit 0

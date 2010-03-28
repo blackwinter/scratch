@@ -1,0 +1,972 @@
+#! /bin/bash
+
+################################################################################
+#                                                                              #
+# otr -- get/decode/play otr files / 7290106 - 7140310                         #
+#                                                                              #
+# Copyright (C) 2006-2010 Jens Wille <ww221E@gmail.com>                        #
+#                                                                              #
+# This program is free software; you can redistribute it and/or                #
+# modify it under the terms of the GNU General Public License                  #
+# as published by the Free Software Foundation; either version 2               #
+# of the License, or (at your option) any later version.                       #
+#                                                                              #
+# This program is distributed in the hope that it will be useful,              #
+# but WITHOUT ANY WARRANTY; without even the implied warranty of               #
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                #
+# GNU General Public License for more details.                                 #
+#                                                                              #
+# You should have received a copy of the GNU General Public License            #
+# along with this program [*]; if not, write to the Free Software              #
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.  #
+#                                                                              #
+# [*] for the complete text of the GNU General Public License see the file     #
+#     COPYING or point your browser at <http://www.gnu.org/licenses/gpl.txt>   #
+#                                                                              #
+################################################################################
+
+#
+# TODO
+#
+# - add: restore from archive
+# - take archive files into account for total time
+# - allow for range specifications
+#
+
+# author and version
+ AUTHOR="Jens Wille <ww221E@gmail.com>"
+VERSION="0.8"
+
+
+################################################################################
+### config
+################################################################################
+
+OTRRC="${OTRRC:-$HOME/.otrrc}"
+
+# source user config
+[ -f "$OTRRC" ] && . "$OTRRC"
+
+BONUS="${BONUS:-500000}"
+
+# paths
+OTRHOME="${OTRHOME:-/usr/local/otr}"
+ARCHIVE="${ARCHIVE:-$OTRHOME/archive}"
+ARCHLST="${ARCHLST:-$OTRHOME/archive-*.lst}"
+OTRKEYS="${OTRKEYS:-$OTRHOME/key}"
+OTRVIDS="${OTRVIDS:-$OTRHOME/vid}"
+DECODER="${DECODER:-$OTRHOME/bin/otrdecoder}"
+ PLAYER="${PLAYER:-/usr/bin/mplayer}"
+APLAYER="${APLAYER:-/usr/bin/gmplayer}"
+VPLAYER="${VPLAYER:-/usr/bin/vlc}"
+BROWSER="${BROWSER:-/usr/bin/firefox}"
+ RLWRAP="${RLWRAP:-/usr/bin/rlwrap}"
+   PERL="${PERL:-/usr/bin/perl}"
+   WGET="${WGET:-/usr/bin/wget}"
+    AWK="${AWK:-/usr/bin/awk}"
+    SED="${SED:-/bin/sed}"
+    CAT="${CAT:-/bin/cat}"
+     DU="${DU:-/usr/bin/du}"
+     TR="${TR:-/usr/bin/tr}"
+    CUT="${CUT:-/usr/bin/cut}"
+   TAIL="${TAIL:-/usr/bin/tail}"
+   SORT="${SORT:-/usr/bin/sort}"
+   UNIQ="${UNIQ:-/usr/bin/uniq}"
+   STAT="${STAT:-/usr/bin/stat}"
+   GREP="${GREP:-/bin/grep}"
+  EGREP="${EGREP:-$GREP -E}"
+  TOUCH="${TOUCH:-/usr/bin/touch}"
+  MOUNT="${MOUNT:-/bin/mount}"
+ UMOUNT="${UMOUNT:-/bin/umount}"
+TUNE2FS="${TUNE2FS:-/usr/bin/sudo /sbin/tune2fs}"
+BASENAM="${BASENAM:-/usr/bin/basename}"
+DIRNAME="${DIRNAME:-/usr/bin/dirname}"
+  MKDIR="${MKDIR:-/bin/mkdir}"
+  SLEEP="${SLEEP:-/bin/sleep 60}"
+   DATE="${DATE:-/bin/date}"
+   FIND="${FIND:-/usr/bin/find}"
+     RM="${RM:-/bin/rm}"
+     MV="${MV:-/bin/mv}"
+     DF="${DF:-/bin/df}"
+
+# login information (set to '-' to be prompted)
+MAIL="${MAIL:--}"
+PASS="${PASS:--}"
+
+# extensions for video files (separated by '|')
+EXT="${EXT:-wmv|mpg|avi}"
+
+# get info from
+QUERY="${QUERY:-http://akas.imdb.com/find?s=tt&q=}"
+
+# some helpful information
+NAME="$($BASENAM "$0")"
+
+DESCRIPTION="\
+get/decode/play otr files"
+
+USAGE="\
+usage:
+    $NAME {-g URLS|-b URLS|-d|-p}
+    $NAME [-h|-v]"
+
+HELP="\
+$NAME: $DESCRIPTION (v$VERSION)
+
+$USAGE
+
+options:
+    -h, --help             display this help and exit
+    -v  --version          print version information and exit
+
+    -g, --get URLS         download specified files
+    -b, --batch URLS       download in non-interactive batch mode
+
+    -d, --decode           decode available files
+    -p, --play             play available files
+    -P, --rlplay           play using rlwrap (readline wrapper)
+
+    -f, --find PATTERN     find video files matching PATTERN
+    -D, --duplicates       find duplicate video files
+    -l, --list             list all video files
+
+    -m, --mount            mount archive
+    -u, --umount           unmount archive
+    -r, --archive          move files from temporary to permanent archive
+    -L, --archive-list     update and display archive list
+
+    -U, --disk-usage       display disk usage
+
+report bugs to $AUTHOR;
+any feedback appreciated."
+
+VERSION_INFO="\
+Copyright (C) 2006-2010 $AUTHOR
+
+This program is free software, and you are welcome to redistribute
+and/or modify it under the terms of the GNU General Public License.
+It comes with ABSOLUTELY NO WARRANTY; not even for MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE."
+
+PLAY_HELP="
+    h, help, ?         display this help
+    q, quit, CTRL-D    quit
+    ENTER              redisplay file list
+
+    pN, play N, N      play file N
+    aN, altplay N      play file N with alternative player
+    vN, vlcplay N      play file N with vlc player
+
+    dN, delete N       delete file N
+    rN, archive N      archive file N
+    mN, rename N       rename file N
+    sN, sort N         sort file N into category
+
+    iN, info N         get info for title N
+"
+
+
+################################################################################
+### sanity checks
+################################################################################
+
+### required functions
+
+# print message and exit
+function die() {
+  echo "$1"
+
+  exit ${2:-1}
+}
+
+### checks
+
+[ -d "$OTRHOME" ] || die "OTRHOME: not a directory: $OTRHOME"
+
+[ -f "$DECODER" ] || die "DECODER: couldn't find file: $DECODER"
+[ -x "$DECODER" ] || die "DECODER: not executable: $DECODER"
+
+[ -f "$PLAYER" ]  || die "PLAYER: couldn't find file: $PLAYER"
+[ -x "$PLAYER" ]  || die "PLAYER: not executable: $PLAYER"
+
+[ -f "$APLAYER" ]  || die "APLAYER: couldn't find file: $APLAYER"
+[ -x "$APLAYER" ]  || die "APLAYER: not executable: $APLAYER"
+
+[ -f "$VPLAYER" ]  || die "VPLAYER: couldn't find file: $VPLAYER"
+[ -x "$VPLAYER" ]  || die "VPLAYER: not executable: $VPLAYER"
+
+[ -f "$BROWSER" ]  || die "BROWSER: couldn't find file: $BROWSER"
+[ -x "$BROWSER" ]  || die "BROWSER: not executable: $BROWSER"
+
+[ -f "$WGET" ]    || die "WGET: couldn't find file: $WGET"
+[ -x "$WGET" ]    || die "WGET: not executable: $WGET"
+
+# we don't have to check for du, cut, tail, grep, ..., do we? ;-)
+
+[ -d "$OTRKEYS" ] || mkdir "$OTRKEYS" || die "OTRKEYS: couldn't create directory: $OTRKEYS"
+[ -d "$OTRVIDS" ] || mkdir "$OTRVIDS" || die "OTRVIDS: couldn't create directory: $OTRVIDS"
+
+# enable extended pattern matching
+shopt -s extglob
+[ "$(shopt extglob | $CUT -f2)" == "on" ] || die "ERROR: couldn't set extglob"
+
+# exit on error
+#set -e
+
+
+################################################################################
+### functions
+################################################################################
+
+### basic utilities
+
+# print usage (+ optional message) and exit
+function die_usage() {
+  [ -n "$1" ] && echo "$1"
+  echo "$USAGE"
+  echo "try '$NAME -h' for more information."
+
+  exit 1
+}
+
+# print help and exit
+function exit_help() {
+  echo "$HELP"
+
+  exit 0
+}
+
+# print version information and exit
+function exit_version() {
+  echo "$NAME $VERSION"
+  echo
+  echo "$VERSION_INFO"
+
+  exit 0
+}
+
+# print welcome message
+function print_welcome() {
+  echo "$NAME: $DESCRIPTION (v$VERSION)"
+  echo
+  echo "$VERSION_INFO"
+  echo
+
+  return 0
+}
+
+function is_mounted() {
+  $MOUNT | $GREP -q " on $1 "
+}
+
+function get_device() {
+  $MOUNT | $GREP " on $1 " | $AWK '{print $1}'
+}
+
+function get_uuid() {
+  d="$(get_device "$1")"
+
+  if [ -n "$d" ]; then
+    u=""
+
+    for l in /dev/disk/by-uuid/*; do
+      if [ "$(readlink -f "$l")" = "$d" ]; then
+        u="$(basename "$l")"
+        break
+     fi
+    done
+
+    if [ -n "$u" ]; then
+      echo "$u"
+    else
+      $TUNE2FS -l "$d" | $GREP 'Filesystem UUID:' | $AWK '{print $3}'
+    fi
+  fi
+}
+
+### program callers
+
+# remover
+function _rm() {
+  while [ -n "$1" ]; do
+    if [ -e "$1" ]; then
+      read -e -p "really delete file '$1'? (y/n) [y]: "
+      [ "$REPLY" == "n" ] || $RM "$1"
+    fi
+
+    shift
+  done
+
+  return 0
+}
+
+# archiver
+function _mv() {
+  while [ -n "$1" ]; do
+    file="$1"; shift
+    archive="$($DIRNAME "$file")/.archive"
+    [ -d "$archive" ] || $MKDIR "$archive" || continue
+
+    $MV "$file" "$archive" && echo "moved to archive: $file"
+  done
+
+  return 0
+}
+
+# renamer
+function _re() {
+  while [ -n "$1" ]; do
+    file="$1"; shift
+
+    read -e -p "new name for '$($BASENAM "$file")': "
+    rename="$($DIRNAME "$file")/$($BASENAM "$REPLY")"
+
+    if [ -n "$REPLY" ] && [ "$rename" != "$file" ]; then
+      if [ -e "$rename" ]; then
+        echo "file already exists: $rename"
+      else
+        $MV "$file" "$rename" && echo "renamed to: $rename"
+
+        # setting 'vid' variable for category selection in otr_decode
+        vid="$rename"
+      fi
+    else
+      echo "not renaming..."
+    fi
+  done
+
+  return 0
+}
+
+# player
+function _play() {
+  vid="$1"
+
+  $PLAYER "$vid" &> /dev/null
+
+  return 0
+}
+
+# alternative player
+function _aplay() {
+  vid="$1"
+
+  $APLAYER "$vid" &> /dev/null
+
+  return 0
+}
+
+# vlc player
+function _vplay() {
+  vid="$1"
+
+  $VPLAYER "$vid" &> /dev/null
+
+  return 0
+}
+
+# get info
+function _info() {
+  file="$1"
+
+  title=$($BASENAM "$file" | $SED -e 's/^\(.*\)_[0-9][0-9].[0-9][0-9].[0-9][0-9]_[0-9][0-9]-[0-9][0-9]_.*/\1/; s/_\+/%20/g')
+
+  $BROWSER "${QUERY}${title/%@(BEGIN|END)}" &
+
+  return 0
+}
+
+# decoder
+function _decode() {
+  key="$1"
+  [ "$2" = "f" ] && force="-q"
+
+  [ "$MAIL" == "-" ] && read -e    -p "enter e-mail address: " MAIL
+  [ "$PASS" == "-" ] && read -e -s -p "enter password: "       PASS
+
+  $DECODER -i "$key" -e "$MAIL" -p "$PASS" -o "$OTRVIDS" $force
+  [ $? -eq 0 ] || _rm "$OTRVIDS/$($BASENAM "${key%.otrkey}")"
+
+  return 0
+}
+
+# downloader
+function _wget {
+  url="$1"
+  prt="$2"
+
+  $WGET -c --progress=dot:mega -O "$prt" "$url" 2>&1 | $EGREP "% |ERROR"
+  [ -s "$prt" ] || return 1
+
+  return 0
+}
+
+# disk usage
+function _du {
+  $DU -ch "$@" | $CUT -f1 | $TAIL -1
+
+  return 0
+}
+
+# free space
+function _df() {
+  $DF -${2:-h} "$1" | $TAIL -1 | $SED -e 's/^[^ ]\+ \+[^ ]\+ \+[^ ]\+ \+\([^ ]\+\).*$/\1/'
+
+  return 0
+}
+
+# convert minutes
+function _hm() {
+  $PERL -e 'printf "%2dh %2dm", ($ARGV[0]-$ARGV[0]%60)/60,$ARGV[0]%60' "$1"
+}
+
+# float to int
+function _int() {
+  $PERL -e '$i=$ARGV[0];$i =~ s/[^MG]*/1/;$i =~ s/G/000M/; $i =~ s/M/000/;printf "%d", $ARGV[0]*$i' "$1"
+}
+
+# file selector
+function _select {
+  action="$1"; alt=""; shift
+  [ -e "$1" ] || return 1
+
+  i=1; t=0; p=""; list=()
+  while [ -n "$1" ]; do
+    if [ ! -e "$1" ]; then
+      shift
+      continue
+    fi
+
+    c="$($DIRNAME "$1")"
+    if [ "$c" != "$p" ]; then
+      p="$c"
+      c="$(echo "${c#$OTRVIDS}" | $SED -e 's/_/ /g; s/^\/\([0-9]\+\) */\1. /')"
+      echo "---- ${c:-NONE} ----"
+    fi
+
+    # file information:
+    #   0 = title
+    #   1 = date
+    #   2 = time
+    #   3 = length
+    #   4 = channel
+    #   5 = size
+    eval x=($($BASENAM "$1" | $SED -e 's/^\(.*\)_\([0-9][0-9]\).\([0-9][0-9]\).\([0-9][0-9]\)_\([0-9][0-9]\)-\([0-9][0-9]\)_\(.*\)_\([0-9]\+\)_.*$/"\1" "\4.\3.\2" "\5:\6" "\8" "\7"/; s/_\+/ /g') "$(_du "$1")")
+
+    # colors:
+    #  normal       = white (1;37)
+    #  date, length = light gray (0;37)
+    #  HQ           = blue (1;34)
+    #  HD           = cyan (1;36)
+    nml="\033[1;37m"
+    hl0="$nml"
+    hl1="\033[0;37m"
+    hl2="$hl1"
+    hl3="\033[1;34m"
+    hl4="\033[1;36m"
+    rst="\033[0m"
+
+    # if - and only if - we have already seen a video the last access time is
+    # greater than the last modification time -- right? (more or less...)
+    # 1. give a little extra time to allow for a quick look at the file
+    # 2. distinguish videos that presumably haven't been watched completely
+    #    (problem: some videos may be shorter than stated)
+    a="$(($($STAT -c "%X" "$1") - $($STAT -c "%Y" "$1")))"
+    if   [ $a -lt 300  ]; then
+      # not seen:
+      #   title, date = light red (1;31)
+      hl0="\033[1;31m"
+      hl1="$hl1"
+    elif [ $a -lt $((${x[3]} * 60)) ]; then
+      # partially seen:
+      #   title, date = light magenta (1;35)
+      hl0="\033[1;35m"
+      hl1="$hl1"
+    fi
+
+    case "$1" in
+      *.HQ.* ) ext="$(printf " [%b%s%b]" "$hl3" "HQ" "$nml")";;
+      *.HD.* ) ext="$(printf " [%b%s%b]" "$hl4" "HD" "$nml")";;
+      *      ) ext="";;
+    esac
+
+    printf "%b%3d) %b\"%s\"%b %b%s%b %s%b+%s%b %s (%s)%s%b\n"            \
+           "$nml"                                                        \
+             "$i"                                                        \
+                  "$hl0" "${x[0]}" "$nml"                                \
+                              "$hl1" "${x[1]}" "$nml"                    \
+                                    "${x[2]}"                            \
+                                      "$hl2" "${x[3]}" "$nml"            \
+                                               "${x[4]}"                 \
+                                                   "${x[5]}"             \
+                                                     "$ext"              \
+                                                       "$rst"
+
+    list[$i]="$1"
+    t=$(($t + ${x[3]}))
+    i=$(($i + 1)); shift
+  done
+
+  # print some statistics
+  tt="$(_hm "$t")"
+  du="$(_du "$OTRVIDS")"
+   u="$(_int "$du")"
+  df="$(_df "$OTRVIDS")"
+   f="$(_int "$df")"
+
+  # colors:
+  #   normal     = white (1;37)
+  #   time       = light gray (0;37)
+  #   used, free = light red (1;31)
+  nml="\033[1;37m"
+  hl0="\033[0;37m"
+  hl1="\033[1;31m"
+  hl2="$hl1"
+  rst="\033[0m"
+
+  if   [ $u -lt $f ]; then
+    # less than 50% full -- ok
+    #   used, free = light green (1;32)
+    hl1="\033[1;32m"
+    hl2="$hl1"
+  elif [ $u -lt $(($f * 9)) ]; then
+    # less than 90% full -- still ok
+    #   used, free = yellow (1;33)
+    hl1="\033[1;33m"
+    hl2="$hl1"
+  fi
+
+  printf "%b[ total time (playlist): %b%s%b | disk usage: %b%s%b | free space: %b%s%b ]%b\n" \
+         "$nml"                                                                              \
+                        "$hl0" "$tt" "$nml"                                                  \
+                                             "$hl1" "$du" "$nml"                             \
+                                                                  "$hl2" "$df" "$nml"        \
+                                                                                      "$rst"
+
+  # check user input
+  while :; do
+    read -e -p "which file to [p]lay or [d]elete? (CTRL-D or [q]uit; ? or [h]elp): "
+
+    [ $? -ne 0 ]                      && echo\
+                                      && return 1                                  # CTRL-D:       quit
+
+    # save original input
+    input="$REPLY"
+
+    case "$REPLY" in
+      "" )                               echo;
+                                         return 0;;                                # ENTER:        redisplay
+      [qQ]?(uit) )                       return 1;;                                # Q:            quit
+      +([0-9]) )                         true;;                                    # N:            play
+      [pP]?(lay)*(\ )+([0-9])    )       REPLY="${REPLY//[^0-9]}";;                # pN:           play
+      [aA]?(ltplay)*(\ )+([0-9]) )       REPLY="${REPLY//[^0-9]}";
+                                         alt="alt";;                               # aN:           play
+      [vV]?(lcplay)*(\ )+([0-9]) )       REPLY="${REPLY//[^0-9]}";
+                                         alt="vlc";;                               # vN:           play
+      [dD]?(elete)*(\ )+([0-9])  )       REPLY="${REPLY//[^0-9]}";
+                                         action="_rm";;                            # dN:           delete
+      @(r|R|[aA]rchive)*(\ )+([0-9])  )  REPLY="${REPLY//[^0-9]}";
+                                         action="_mv";;                            # rN:           archive
+      @(m|M|[rR]ename)*(\ )+([0-9])   )  REPLY="${REPLY//[^0-9]}";
+                                         action="_re";;                            # mN:           rename
+      [sS]?(ort)*(\ )+([0-9]) )          REPLY="${REPLY//[^0-9]}";
+                                         action="_select_category";;               # sN:           sort
+      [iI]?(nfo)*(\ )+([0-9])  )         REPLY="${REPLY//[^0-9]}";
+                                         #action="_info";
+                                         _info "${list[$REPLY]}";
+                                         continue;;                                # iN:           info
+      [pP]?(lay)       \
+      |[aA]?(ltplay)   \
+      |[vV]?(lcplay)   \
+      |[dD]?(elete)    \
+      |[rR]|[aA]rchive \
+      |[mM]|[rR]ename  \
+      |[sS]?(ort)      \
+      |[iI]?(nfo)      )                 echo "> omitted number, try: ${REPLY}N";
+                                         continue;;                                # p or d w/o N: ask again
+      [hH]?(elp)|\? )                    echo "$PLAY_HELP";
+                                         continue;;                                # H/?:          ask again
+      * )                                echo "> illegal input: $REPLY";
+                                         continue;;                                # NaN:          ask again
+    esac
+    [ $REPLY -le 0 -o $REPLY -ge $i ] && echo "> value out of range: $REPLY"\
+                                      && continue                                  # out-of-range: ask again
+
+    break
+  done
+
+  $action "${list[$REPLY]}" "$alt"
+
+  return 0
+}
+
+# category selector
+function _select_category() {
+  vid="$1"
+
+  while :; do
+    cat=(); list=""; i=0
+    for d in $($FIND "$OTRVIDS" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) ! -name ".*" | $SORT); do
+      cat[$i]="$d"
+      i=$(($i + 1))
+
+      list="$list\n$(printf "%3d) %s" "$i" "$($BASENAM "$d" | $SED -e 's/^[0-9]\+_*//')")"
+    done
+
+    [ $i -eq 0 ] && echo && return 0
+
+    nam="$($BASENAM "$vid")"; REPLY=""
+
+    for pat in "${SELECT_NONE[@]}";  do case "$nam" in $pat ) REPLY=0; break;; esac; done
+    for pat in "${SELECT_ONE[@]}";   do case "$nam" in $pat ) REPLY=1; break;; esac; done
+    for pat in "${SELECT_TWO[@]}";   do case "$nam" in $pat ) REPLY=2; break;; esac; done
+    for pat in "${SELECT_THREE[@]}"; do case "$nam" in $pat ) REPLY=3; break;; esac; done
+    for pat in "${SELECT_FOUR[@]}";  do case "$nam" in $pat ) REPLY=4; break;; esac; done
+    for pat in "${SELECT_FIVE[@]}";  do case "$nam" in $pat ) REPLY=5; break;; esac; done
+    for pat in "${SELECT_SIX[@]}";   do case "$nam" in $pat ) REPLY=6; break;; esac; done
+
+    if [ -n "$REPLY" ]; then
+      if [ "$REPLY" -eq 0 ]; then
+        echo "sorting '$nam' into category: NONE"
+        echo
+        return 0
+      else
+        echo "sorting '$nam' into category: ${cat[$(($REPLY - 1))]}"
+      fi
+    else  # ask
+      echo -e "${list:2}"
+      read -e -p "which category to sort '$nam' into? (1-$i) [NONE]: "
+      [ $? -ne 0 ] && REPLY=""
+
+      case "$REPLY" in
+        "" )       echo;
+                   return 0;;
+        +([0-9]) ) true;;
+        * )        echo "> illegal input: $REPLY";
+                   echo;
+                   continue;;
+      esac
+
+      [ $REPLY -lt 1 -o $REPLY -gt $i ] && echo "> value out of range: $REPLY"\
+                                        && echo \
+                                        && continue
+    fi
+
+    tgt="${cat[$(($REPLY - 1))]}"
+    [ "$(cd "$($DIRNAME "$vid")"; pwd -P)" != "$(cd "$tgt"; pwd -P)" ] && $MV "$vid" "$tgt"
+    echo
+
+    break
+  done
+
+  return 0
+}
+
+### main functions
+
+# play vid
+function otr_play() {
+  vid="$1"
+  alt="$2"
+  [ -e "$vid" ] || return 1
+
+  echo
+  if [ -z "$alt" ]; then
+    echo "playing: $vid"
+    _play "$vid"
+  else
+    if [ "$alt" = "vlc" ]; then
+      echo "playing with vlc player: $vid"
+      _vplay "$vid"
+    else
+      echo "playing with alternative player: $vid"
+      _aplay "$vid"
+    fi
+  fi
+
+  # update access time
+  $TOUCH -a "$vid"
+
+  read -e -p "keep '$vid'? (y/n/r/m/p/a/v) [y]: "
+  case "$REPLY" in
+    n ) _rm "$vid"; echo;;
+    r ) _mv "$vid"; echo;;
+    m ) _re "$vid"; echo;;
+    p ) otr_play "$vid";;
+    a ) otr_play "$vid" "alt";;
+    v ) otr_play "$vid" "vlc";;
+    * ) echo;;
+  esac
+
+  return 0
+}
+
+# decode key
+function otr_decode() {
+  key="$1"
+  [ -s "$key" ] || return 1
+
+  vid="$OTRVIDS/$($BASENAM "${key%.otrkey}")"
+  if [ -e "$vid" ]; then
+    echo "video file already exists: $vid"
+  else
+    sz="$(_du "$key")"
+    si="$(_int "$sz")"
+
+    # colors:
+    #   probably ok = light green (1;32)
+    hl0="\033[1;32m"
+    rst="\033[0m"
+
+    if   [ $si -lt "$(_int "200M")" ]; then
+      # probably not ok = red (1;31)
+      hl0="\033[1;31m"
+    elif [ $si -lt "$(_int "400M")" ]; then
+      # maybe ok = yellow (1;33)
+      hl0="\033[1;33m"
+    fi
+
+    printf "decode '$key' [%b%s%b]? (y/n/f) [y]: " "$hl0" "$sz" "$rst"
+    read -e
+    [ "$REPLY" == "n" ] && return 0
+
+    # do not decode if free space under-runs file size (plus BONUS)
+    [ $(_df "$OTRVIDS" "-") -lt $(($($STAT -c "%s" "$key") / 1024 + $BONUS)) ] && echo "WARNING: will not decode: $key (not enough free space: $OTRVIDS)" && return 1
+
+    _decode "$key" "$REPLY"
+
+    if [[ "$vid" =~ "_Top_Tipp_" ]]; then
+      old="$vid"
+      vid="${vid/_Top_Tipp_}"
+
+      mv "$old" "$vid"
+    fi
+
+    if [ -s "$vid" ]; then
+      read -e -p "play '$vid'? (y/n/a) [y]: "
+      case "$REPLY" in
+        n ) echo;;
+        a ) otr_play "$vid" "1";;
+        * ) otr_play "$vid";;
+      esac
+
+      [ -e "$vid" ] && _select_category "$vid"
+    fi
+  fi
+
+  read -e -p "delete key '$key'? (y/n) [y]: "
+  [ "$REPLY" == "n" ] || _rm "$key"
+
+  return 0
+}
+
+# download key
+function otr_get() {
+  url="$1"
+  bat="$2"
+  key="$OTRKEYS/$($BASENAM "$url")"
+  prt="${key}.part"
+
+  echo "downloading: $url"
+
+  until _wget "$url" "$prt"; do
+    $SLEEP
+  done
+  mv "$prt" "$key"
+
+  echo
+  [ -n "$bat" ] || otr_decode "$key"
+
+  return 0
+}
+
+function find_vids() {
+  _find_vids "$1" "$OTRVIDS"
+  _grep_vids "$1"
+}
+
+function _find_vids() {
+  pattern="$1"; shift
+
+  $FIND -L "$@"               \
+    -iname "*$pattern*"       \
+    -type f                   \
+    $FIND_OPTS                \
+    -printf "%p [%k -- %t]\n" \
+  | $SORT
+}
+
+function _grep_vids() {
+  $EGREP -i "$1[^/]+" $ARCHLST | $PERL -pe 's{.*?-(.*?)\..*?:}{($1=="'"$(get_uuid "$ARCHIVE")"'"?"\033[0;33m":"\033[0;37m").$1.": "}e; s{$}{\033[0m}'
+}
+
+function mount_archive() {
+  [ -d "$ARCHIVE" ] || die "directory does not exist: $ARCHIVE"
+
+  if is_mounted "$ARCHIVE"; then
+    if [ -n "$1" ]; then
+      return 0
+    else
+      die "already mounted: $ARCHIVE"
+    fi
+  fi
+
+  $MOUNT "$ARCHIVE" || die "mount failed: $ARCHIVE"
+  [ -n "$1" ] || $DF -h "$ARCHIVE"
+}
+
+function umount_archive() {
+  is_mounted "$ARCHIVE" || die "not mounted: $ARCHIVE"
+
+  $UMOUNT "$ARCHIVE"
+}
+
+function disk_usage() {
+  $DF -h "$OTRHOME" "$ARCHIVE" | $UNIQ
+}
+
+function archive() {
+  mount_archive "relax"
+
+  archlst="$(archlst)"
+  if [ ! -f "$archlst" ]; then
+    read -e -p "create archive? (y/n) [n]: "
+    [ "$REPLY" == "y" ] || return 1
+  fi
+
+  while [ -n "$1" ]; do
+    file="$1"; shift
+    [ -e "$file" ] || continue
+
+    archive="$ARCHIVE/$(echo "$file" | $SED 's:.*/\([^/]\+\)/\.archive/.*:\1:')"
+    [ -d "$archive" ] || $MKDIR "$archive" || continue
+
+    $MV "$file" "$archive" && echo "moved to permanent archive: $file"
+  done
+
+  mkarchlst
+
+  return 0
+}
+
+function archlst() {
+  echo "$ARCHLST" | sed "s/\*/$(get_uuid "$ARCHIVE")/"
+}
+
+function mkarchlst() {
+  mount_archive "relax"
+
+  _find_vids "" "$ARCHIVE" > "$(archlst)"
+}
+
+
+################################################################################
+### action
+################################################################################
+
+[ -n "$1" ] || die_usage
+
+case "$1" in
+  -h|--help    ) exit_help;;
+  -v|--version ) exit_version;;
+  -g|--get|-b|--batch )
+                 b=""
+                 [ "${1:1:1}" == "b" ] && b="1"
+                 shift
+
+                 [ -n "$1" ] || die_usage "no URLs supplied"
+                 print_welcome
+
+                 while [ -n "$1" ]; do
+                   otr_get "$1" "$b"; shift
+                 done
+                 ;;
+  -d|--decode  )
+                 print_welcome
+
+                 for key in "$OTRKEYS"/*.otrkey; do
+                   [ -e "$key" ] || die "INFO: no keys found: $OTRKEYS" 0
+
+                   otr_decode "$key"
+                 done
+                 ;;
+  -p|--play    )
+                 print_welcome
+
+                 while :; do
+                   vids=(); i=0
+                   for vid in "$OTRVIDS"/*/*.@($EXT) "$OTRVIDS"/*.@($EXT); do
+                     [ -e "$vid" ] && vids[i]="$vid" && i=$((i+1))
+                   done
+                   [ ${#vids[@]} -eq 0 ] && die "INFO: no video files found: $OTRVIDS" 0
+
+                   _select "otr_play" "${vids[@]}" || break
+                 done
+                 ;;
+  -P|--rlplay  )
+                 $RLWRAP -a -D2 $0 -p
+                 ;;
+  -f|--find    )
+                 shift
+
+                 [ -n "$1" ] || die_usage "no patterns supplied"
+                 print_welcome
+
+                 while [ -n "$1" ]; do
+                   find_vids "$1"; shift
+                 done
+                 ;;
+  -D|--duplicates )
+                 print_welcome
+
+                 find_vids ""                                                                     |\
+                   $GREP -v "${DUPE_EXCL:-XXXYYYZZZ}"                                             |\
+                   $SED 's:.*/\(.*\)\(_([0-9]-[0-9])\)\?_[0-9][0-9].[0-9][0-9].[0-9][0-9]_.*:\1:' |\
+                   $SED 's:_([0-9]-[0-9])$::'                                                     |\
+                   $TR  '[:upper:]' '[:lower:]'                                                   |\
+                   $SORT                                                                          |\
+                   $UNIQ -d                                                                       |\
+                   while read d; do
+                     find_vids "$d"
+                   done
+                 ;;
+  -l|--list    )
+                 print_welcome
+
+                 find_vids ""
+                 ;;
+  -m|--mount   )
+                 mount_archive
+                 ;;
+  -u|--umount  )
+                 umount_archive
+                 ;;
+  -U|--disk-usage )
+                 print_welcome
+
+                 disk_usage
+                 ;;
+  -r|--archive )
+                 print_welcome
+
+                 vids=(); i=0
+                 for vid in "$OTRVIDS"/*/.archive/*.@($EXT); do
+                   [ -e "$vid" ] && vids[i]="$vid" && i=$((i+1))
+                 done
+                 [ ${#vids[@]} -eq 0 ] && die "INFO: no video files found: $OTRVIDS" 0
+
+                 archive "${vids[@]}"
+                 ;;
+  -L|--archive-list )
+                 print_welcome
+
+                 mkarchlst
+                 $CAT $ARCHLST
+                 ;;
+  -z           ) get_uuid "$ARCHIVE";;
+  -*           ) die_usage "unrecognized option: $1";;
+  *            ) die_usage "illegal argument: $1";;
+esac
+
+# that's it ;-)
+exit 0

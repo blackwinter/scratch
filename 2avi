@@ -1,0 +1,17 @@
+#! /bin/bash
+
+ENC="mencoder -ovc lavc -oac copy -o"
+
+while [ -n "$1" ]; do
+  f="$1"; shift
+  g="${f%.*}.avi"
+
+  if [ -r "$f" ]; then
+    if [ -e "$g" ]; then
+      echo "[EXISTS] $g"
+    else
+      echo "$f"
+      $ENC "$g" "$f" &> /dev/null
+    fi
+  fi
+done

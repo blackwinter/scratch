@@ -1,0 +1,46 @@
+#! /bin/bash
+
+# pdfwrite: convert ps to pdf (or vice versa) or merge multiple (ps|pdf)'s into one / 2110105 - 2050705
+
+usage="usage: $0 [-h|--help] [-a4] <out.(ps|pdf)> <in.(ps|pdf)> ..."
+[ -z "$1" ] && echo "$usage" && exit 1
+
+IN=""
+OUT=""
+DEV=""
+PGSZ=""
+
+while [ -n "$1" ]; do
+  case $1 in
+    -h|--help  ) echo -e "$usage\nconvert ps to pdf (or vice versa) or merge multiple (ps|pdf)'s into one"; exit 1;;
+    -a4        ) PGSZ="-sPAGESIZE=a4"; shift;;
+    -*         ) echo -e "unknown option '$1'!\n$usage"; exit 1;;
+    *.ps|*.pdf )
+      if [ -z "$OUT" ]; then
+        case $1 in
+          *.pdf      ) OUT="$1"; DEV="pdfwrite"; shift;;
+          *.ps       ) OUT="$1"; DEV="pswrite"; shift;;
+          *          ) echo -e "outfile '$1': only ps and pdf allowed!\n$usage"; exit 1;;
+        esac
+        #[ ! -w "$1" ] && echo -e "can't write to outfile '$1'!" && exit 1
+      else
+        case $1 in
+          *.ps|*.pdf ) if [ -r "$1" ]; then IN="$IN $1"; else echo -e "can't read infile '$1'! skipping ..."; fi; shift;;
+          *          ) echo -e "infile '$1': only ps and pdf allowed! skipping ..."; shift;;
+        esac
+      fi
+      ;;
+    *          ) echo -e "illegal argument '$1' will be ignored!\n$usage";;
+  esac
+done
+
+[ -z "$OUT" ] && echo -e "outfile missing!\n$usage" && exit 1
+[ -z "$IN" ]  && echo -e "infile(s) missing!\n$usage" && exit 1
+
+if [ -r "$OUT" ]; then
+  echo -n "outfile '$OUT' already exists! overwrite? (y/n) [n]: " && read A
+  [ ! "$A" = "y" ] && exit 1
+fi
+
+gs -dBATCH -dNOPAUSE -sDEVICE=$DEV $PGSZ -sOutputFile=$OUT $IN
+
