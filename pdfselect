@@ -1,0 +1,69 @@
+#! /bin/bash
+
+# pdfselect: like psselect, just for pdf / 4241105 - 5251105
+
+USAGE="usage: $0 <in.pdf> <out.pdf> <range> [keep]"
+
+# need exactly 3 or 4 arguments
+[ "$#" -lt 3 -o "$#" -gt 4 ] && echo $USAGE && exit 0
+
+# check for pdftk
+[ ! -x "$(which pdftk)" ] && echo "can't find 'pdftk'!" && exit 1
+
+# set extglob if necessary
+[ "$(shopt | grep extglob | cut -f 2)" = "on" ] || shopt -s extglob || exit 1
+
+# arguments
+ IN="$1"
+OUT="$2"
+RNG="$3"
+ KP="$4"
+
+[ "$KP" -a "$KP" != "keep" ] && echo -e "illegal parameter '$KP'!\n$USAGE" && exit 1
+
+# check files
+case $IN in
+  *.pdf ) [ ! -r "$IN" ] && echo "can't find infile '$IN'!" && exit 1;;
+  *     ) echo -e "not a pdf file '$IN'!\n$USAGE" && exit 1;;
+esac
+
+case $OUT in
+  *.pdf )
+    if [ -r "$OUT" ]; then
+      echo -n "outfile '$OUT' already exists! overwrite? (y/n) [n]: " && read A
+      [ ! "$A" = "y" ] && exit 0
+    fi
+    ;;
+  *     ) echo -e "not a pdf file '$OUT'!\n$USAGE" && exit 1;;
+esac
+
+# parse range
+RNG="$(perl -e '
+  $_ = $ARGV[0];
+  $z = (<pg_*.pdf>)[-1];
+  $z =~ s/pg_0*(\d+)\.pdf/$1/;
+  s/^(?=-)/1/;
+  s/(?<=-)$/$z/;
+  s/,/|/g;
+  s/(\d+)-(\d+)/join("|",$1..$2)/eg;
+  s/^\||\|$//g;
+  print "!"   if /[^\d|]/;
+  print "+$z" if /^$/;
+  print;
+  ' -- $RNG)"
+case "$RNG" in !*) RNG="$(echo "$RNG" | sed 's/^!//')"
+                   echo "not a valid range format '$RNG'!" && exit 1;;
+               +*) RNG="$(echo "$RNG" | sed 's/^+//')"
+                   echo "value out of range! (max=$RNG)"   && exit 1;; esac
+
+# split in.pdf
+pdftk "$IN" burst || exit 1
+
+# join pages
+pdftk pg_*(0)@($RNG).pdf cat output "$OUT" || exit 1
+
+# rm temp files
+[ -z "$KP" ] && rm -vf doc_data.txt pg_*.pdf
+
+# that's it
+exit 0
