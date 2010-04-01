@@ -1,0 +1,10 @@
+#! /bin/bash
+
+# inspired by <http://gist.github.com/327785>
+
+m="$0.macros"
+[ -f "$m" ] || m="$(readlink "$0").macros"
+
+o="%r------------------------------------------------------------------------\n"
+
+sgrep -dN -o "$o" -f "$m" -e 'RAILSENTRY containing "'"$1"'"' -- "${2:--}"

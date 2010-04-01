@@ -1,0 +1,6 @@
+define(LEND,( "\n" or end ))
+define(LINE,( start .. LEND or ("\n" _. LEND) ))
+
+define(RAILSSTART,( LINE containing " Processing " ))
+define(RAILSEND,( LINE containing " Completed in " or end ))
+define(RAILSENTRY,( RAILSSTART .. RAILSEND or RAILSSTART ._ RAILSSTART ))

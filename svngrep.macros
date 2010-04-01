@@ -1,0 +1,5 @@
+define(LEND,( "\n" or end ))
+define(LINE,( start .. LEND or ("\n" _. LEND) ))
+
+define(SVNDELIM,( LINE equal "------------------------------------------------------------------------\n" ))
+define(SVNENTRY,( SVNDELIM _. SVNDELIM ))

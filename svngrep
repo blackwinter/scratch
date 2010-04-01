@@ -1,0 +1,6 @@
+#! /bin/bash
+
+m="$0.macros"
+[ -f "$m" ] || m="$(readlink "$0").macros"
+
+sgrep -dN -f "$m" -e 'SVNENTRY containing "'"$1"'"' -- "${2:--}"
