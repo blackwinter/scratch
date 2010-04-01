@@ -1,0 +1,3 @@
+#! /usr/bin/ruby
+
+puts Time.at(ARGV.first.to_i).strftime('%Y/%m/%d %H:%M:%S')
