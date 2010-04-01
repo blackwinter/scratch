@@ -1,0 +1,17 @@
+#! /bin/bash
+
+function info() {
+  svn info "$1" | awk "/^$2:/{print \$$3}"
+}
+
+while [ -n "$1" ]; do
+  path="$1"; shift
+
+  url="$(info "$path" 'URL' 2)"
+  url="${url/\/svn\///trac/}"
+
+  root="$(info "$path" 'Repository Root' 3)"
+  root="$(basename "$root")"
+
+  x-www-browser "${url/\/$root\///$root/browser/}"
+done
