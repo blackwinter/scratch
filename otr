@@ -617,13 +617,13 @@ function _select_category() {
 
     nam="$($BASENAM "$vid")"; REPLY=""
 
-    for pat in "${SELECT_NONE[@]}";  do case "$nam" in $pat ) REPLY=0; break;; esac; done
-    for pat in "${SELECT_ONE[@]}";   do case "$nam" in $pat ) REPLY=1; break;; esac; done
-    for pat in "${SELECT_TWO[@]}";   do case "$nam" in $pat ) REPLY=2; break;; esac; done
-    for pat in "${SELECT_THREE[@]}"; do case "$nam" in $pat ) REPLY=3; break;; esac; done
-    for pat in "${SELECT_FOUR[@]}";  do case "$nam" in $pat ) REPLY=4; break;; esac; done
-    for pat in "${SELECT_FIVE[@]}";  do case "$nam" in $pat ) REPLY=5; break;; esac; done
-    for pat in "${SELECT_SIX[@]}";   do case "$nam" in $pat ) REPLY=6; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_NONE[@]}";  do case "$nam" in $pat* ) REPLY=0; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_ONE[@]}";   do case "$nam" in $pat* ) REPLY=1; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_TWO[@]}";   do case "$nam" in $pat* ) REPLY=2; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_THREE[@]}"; do case "$nam" in $pat* ) REPLY=3; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_FOUR[@]}";  do case "$nam" in $pat* ) REPLY=4; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_FIVE[@]}";  do case "$nam" in $pat* ) REPLY=5; break;; esac; done
+    [ -z "$REPLY" ] && for pat in "${SELECT_SIX[@]}";   do case "$nam" in $pat* ) REPLY=6; break;; esac; done
 
     if [ -n "$REPLY" ]; then
       if [ "$REPLY" -eq 0 ]; then
