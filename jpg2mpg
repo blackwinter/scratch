@@ -29,13 +29,14 @@ Options:
 Input files are taken from GLOB [Default: $GLOB].
 Output file will be written to NAME.mpg [Required]."
 
-while getopts hd:f:b:g: opt; do
+while getopts hd:f:b:g:c: opt; do
   case "$opt" in
     h ) echo "$HELP"; exit 0;;
     d ) DELAY="$OPTARG";;
     f ) FPS="$OPTARG";;
     b ) BITRATE="$OPTARG";;
     g ) GEOMETRY="$OPTARG";;
+    c ) COLOR="$OPTARG";;
   esac
 done
 
