@@ -75,7 +75,9 @@ function maxdim() {
 }
 
 [ "$GEOMETRY" == "auto" ] && GEOMETRY="$(maxdim w)x$(maxdim h)"
-convert -size "$GEOMETRY" xc:none -fill "$COLOR" "$BASEIMG"
+
+convert -size "$GEOMETRY" xc:none -fill "$COLOR" \
+  -draw "rectangle 0,0 ${GEOMETRY/x/,}" "$BASEIMG"
 
 for file in $GLOB; do
   make_tmpfile
