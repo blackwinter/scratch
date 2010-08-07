@@ -3,7 +3,9 @@
 DELAY="2"
 FPS="24"
 BITRATE="1024k"
+
 GEOMETRY="auto"
+COLOR="black"
 
 GLOB="*.jpg"
 
@@ -15,12 +17,14 @@ $USAGE
 $PROG -- Make an MPEG video from a list of JPEG's
 
 Options:
-    -d NUM   Delay between images in seconds [Default: $DELAY]
-    -f NUM   Frames per second [Default: $FPS]
-    -b NUM   Video bitrate in bit/s [Default: $BITRATE]
-    -g WxH   Geometry to resize images to [Default: $GEOMETRY]
+    -d NUM     Delay between images in seconds [Default: $DELAY]
+    -f NUM     Frames per second [Default: $FPS]
+    -b NUM     Video bitrate in bit/s [Default: $BITRATE]
 
-    -h       Display this help and exit
+    -g WxH     Geometry to resize images to [Default: $GEOMETRY]
+    -c COLOR   Background color [Default: $COLOR]
+
+    -h         Display this help and exit
 
 Input files are taken from GLOB [Default: $GLOB].
 Output file will be written to NAME.mpg [Required]."
@@ -46,7 +50,7 @@ NUMFILES="$(ls -1 $GLOB 2> /dev/null | wc -l)"
 [ "$NUMFILES" -eq 0 ] && echo "$GLOB: No such file" && exit 1
 
 FRAMES=$(($DELAY * $FPS - 1))
-FORMAT="%0$(echo -n "$NUMFILES" | wc -c)d"
+FORMAT="%0$(($(echo -n "$NUMFILES" | wc -c) * ($FRAMES + 1)))d"
 
 TMPDIR=".${PROG}_tmp.$$"
 BASEIMG="$TMPDIR/__base__.jpg"
@@ -70,11 +74,11 @@ function maxdim() {
 }
 
 [ "$GEOMETRY" == "auto" ] && GEOMETRY="$(maxdim w)x$(maxdim h)"
-convert -size "$GEOMETRY" xc:none -fill black "$BASEIMG"
+convert -size "$GEOMETRY" xc:none -fill "$COLOR" "$BASEIMG"
 
 for file in $GLOB; do
   make_tmpfile
-  TMPBASE="$(basename "$TMPFILE")"
+  tmpbase="$(basename "$TMPFILE")"
 
   composite -resize "$GEOMETRY" \
     -compose atop -gravity center \
@@ -84,7 +88,7 @@ for file in $GLOB; do
 
   for _ in $(seq $FRAMES); do
     make_tmpfile
-    ln -s "$TMPBASE" "$TMPFILE"
+    ln -s "$tmpbase" "$TMPFILE"
   done
 done
 
