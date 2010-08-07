@@ -1,0 +1,97 @@
+#! /bin/bash
+
+DELAY="2"
+FPS="24"
+BITRATE="1024k"
+GEOMETRY="auto"
+
+GLOB="*.jpg"
+
+USAGE="Usage: $0 [OPTIONS]... NAME [GLOB]"
+PROG="$(basename "$0")"
+HELP="\
+$USAGE
+
+$PROG -- Make an MPEG video from a list of JPEG's
+
+Options:
+    -d NUM   Delay between images in seconds [Default: $DELAY]
+    -f NUM   Frames per second [Default: $FPS]
+    -b NUM   Video bitrate in bit/s [Default: $BITRATE]
+    -g WxH   Geometry to resize images to [Default: $GEOMETRY]
+
+    -h       Display this help and exit
+
+Input files are taken from GLOB [Default: $GLOB].
+Output file will be written to NAME.mpg [Required]."
+
+while getopts hd:f:b:g: opt; do
+  case "$opt" in
+    h ) echo "$HELP"; exit 0;;
+    d ) DELAY="$OPTARG";;
+    f ) FPS="$OPTARG";;
+    b ) BITRATE="$OPTARG";;
+    g ) GEOMETRY="$OPTARG";;
+  esac
+done
+
+shift $(($OPTIND - 1))
+
+[ $# -lt 1 -o $# -gt 2 ] && echo "$USAGE" && exit 1
+
+NAME="$1"
+GLOB="${2:-$GLOB}"
+
+NUMFILES="$(ls -1 $GLOB 2> /dev/null | wc -l)"
+[ "$NUMFILES" -eq 0 ] && echo "$GLOB: No such file" && exit 1
+
+FRAMES=$(($DELAY * $FPS - 1))
+FORMAT="%0$(echo -n "$NUMFILES" | wc -c)d"
+
+TMPDIR=".${PROG}_tmp.$$"
+BASEIMG="$TMPDIR/__base__.jpg"
+
+rm -rf "$TMPDIR"
+mkdir "$TMPDIR"
+
+COUNTER=0; TMPFILE=""
+
+function make_tmpfile() {
+  if [ -z "$1" ]; then
+    ((COUNTER++))
+    seqname="$(printf "$FORMAT" $COUNTER)"
+  fi
+
+  TMPFILE="$TMPDIR/${1:-$seqname}.jpg"
+}
+
+function maxdim() {
+  identify -format "%$1\n" $GLOB | sed '/^$/d' | sort -rn | head -1
+}
+
+[ "$GEOMETRY" == "auto" ] && GEOMETRY="$(maxdim w)x$(maxdim h)"
+convert -size "$GEOMETRY" xc:none -fill black "$BASEIMG"
+
+for file in $GLOB; do
+  make_tmpfile
+  TMPBASE="$(basename "$TMPFILE")"
+
+  composite -resize "$GEOMETRY" \
+    -compose atop -gravity center \
+    "$file" "$BASEIMG" "$TMPFILE"
+
+  echo -n .
+
+  for _ in $(seq $FRAMES); do
+    make_tmpfile
+    ln -s "$TMPBASE" "$TMPFILE"
+  done
+done
+
+echo
+make_tmpfile "$FORMAT"
+
+ffmpeg -b "$BITRATE" -f image2 \
+  -i "$TMPFILE" -r "$FPS" "$NAME.mpg"
+
+rm -rf "$TMPDIR"
