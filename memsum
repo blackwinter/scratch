@@ -1,9 +1,30 @@
 #! /bin/bash
 
+EXP=""
+MAX=""
+
 function sum() {
-  mem="$(echo $(ps -C ${1// /,} -o $2 --no-headers))"
-  echo $((($(echo "${mem// /+}")+0)/1024))
+  cmd="$1"
+  col="$2"
+  [ -n "$EXP" ] && col="$col,command"
+
+  mem="$(echo $(ps -C ${cmd// /,} -o $col --no-headers | grep "$EXP" | awk '{print $1}' | sort -rn))"
+  mem="$(echo "${mem// / + }")"
+  [ -n "$MAX" ] && mem="$(echo "$mem" | sed 's/ .*//')"
+
+  echo $((($mem + 0) / 1024))
 }
+
+while getopts e:m opt; do
+  case "$opt" in
+    e ) EXP="$OPTARG";;
+    m ) MAX="1";;
+  esac
+done
+
+shift $(($OPTIND - 1))
+
+[ $# -lt 1 ] && exit 1
 
 arg="$(echo $*)"
 
