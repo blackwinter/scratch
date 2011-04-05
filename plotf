@@ -1,17 +1,15 @@
 #! /usr/bin/ruby
 
 require 'rubygems'
+
+gem 'blackwinter-gnuplot'
 require 'gnuplot'
 
-Gnuplot.open { |gp|
-  Gnuplot::Plot.new(gp) { |plot|
-    plot.xrange ARGV.shift if ARGV.first =~ /\A[\[(]-?\d*:-?\d*[)\]]\z/
+Gnuplot.plot { |plot|
+  plot.xrange ARGV.shift if ARGV.first =~ /\A\[(?:-?\d+)?:(?:-?\d+)?\]\z/
 
-    ARGV.each { |function|
-      plot.data << Gnuplot::DataSet.new(function) { |ds|
-        ds.with = 'lines'
-        ds.linewidth = 1
-      }
-    }
-  }
+  ARGV.each { |function| plot.data(function) { |ds|
+    ds.with = 'lines'
+    ds.linewidth = 1
+  } }
 }
