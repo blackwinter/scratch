@@ -1,0 +1,200 @@
+#! /usr/bin/ruby
+
+require 'optparse'
+
+require 'rubygems'
+require 'fastercsv'
+
+require 'nuggets/array/regression'
+require 'nuggets/numeric/limit'
+
+gem 'blackwinter-gnuplot'
+require 'gnuplot'
+
+module PlotCSV
+
+  extend self
+
+  VERSION = '0.0.1'
+
+  USAGE = "Usage: #{$0} [options] <csv>..."
+
+  DEFAULTS = {
+    :range      => nil,
+    :aggregate  => nil,
+    :linear_fit => false,
+    :terminal   => 'png',
+    :style      => 'lines',
+    :width      => nil,
+    :height     => nil,
+    :min_x      => nil,
+    :max_x      => nil,
+    :min_y      => nil,
+    :max_y      => nil
+  }
+
+  def run(argv = ARGV)
+    plot(*read(argv, options = parse_options(argv)) << options)
+  end
+
+  def read(files, options = {})
+    data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
+
+    range, aggregate = options.values_at(:range, :aggregate)
+
+    fcsv_opts = { :headers => true, :converters => :numeric }
+
+    Array(files).each { |file|
+      names << File.basename(file, '.csv')
+
+      FasterCSV.foreach(file, fcsv_opts) { |row|
+        row.each_with_index { |(label, value), index|
+          next unless range.nil? || range.include?(index)
+
+          if aggregate
+            key = row.values_at(*aggregate) << label
+            seen = aggregates.has_key?(key)
+
+            aggregates[key] += value
+            next if seen
+
+            value = key
+          end
+
+          data[label] << value
+        }
+      }
+    }
+
+    data.each_value { |values| values.map! { |v| aggregates[v] } } if aggregate
+
+    [data, names]
+  end
+
+  def plot(data, names, options = {})
+    x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
+    y = options[:height] || data.values.flatten.max.between(512, 768)
+
+    o = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
+
+    style, fit = options.values_at(:style, :linear_fit)
+
+    Gnuplot.plot { |plot|
+      plot.terminal "#{options[:terminal]} size #{x}, #{y}"
+
+      plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
+      plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
+
+      plot.title "#{Array(names).join(' / ')}#{"\\n#{o.delete('"')}" unless o.empty?}"
+
+      data.sort.each { |label, values|
+        plot.data(values) { |ds|
+          ds.with  = style
+          ds.title = label
+        } unless fit == :only
+
+        plot.data(
+          Array.new(values.size) { |i| i + 1 }.zip(values).llsq.map { |_, i| i }
+        ) { |ds|
+          ds.with  = 'lines'
+          ds.title = "#{label} (fit)"
+        } if fit
+      }
+    }
+  end
+
+  private
+
+  def parse_options(arguments, options = DEFAULTS)
+    option_parser(options).parse!(arguments)
+
+    abort USAGE if arguments.empty?
+
+    options
+  end
+
+  def option_parser(options)
+    OptionParser.new { |opts|
+      opts.banner = USAGE
+
+      opts.separator ''
+      opts.separator 'Options:'
+
+      opts.on('-t', '--terminal TERMINAL', "Gnuplot terminal [Default: '#{options[:terminal]}']") { |t|
+        options[:terminal] = t
+      }
+
+      opts.on('-s', '--style STYLE', "Gnuplot line style [Default: '#{options[:style]}']") { |s|
+        options[:style] = s
+      }
+
+      opts.separator ''
+
+      opts.on('-r', '--range COLUMNS', "Column range (ex: '0-3,6,8') [Default: all]") { |r|
+        options[:range] = column_ranges(r)
+      }
+
+      opts.on('-a', '--aggregate COLUMNS', 'Columns to aggregate on [Default: none]') { |c|
+        options[:aggregate] = column_ranges(c)
+      }
+
+      opts.separator ''
+
+      opts.on('-W', '--width WIDTH', Integer, 'Terminal width [Default: auto]') { |w|
+        options[:width] = w
+      }
+
+      opts.on('-H', '--height HEIGHT', Integer, 'Terminal height [Default: auto]') { |h|
+        options[:height] = h
+      }
+
+      opts.separator ''
+
+      opts.on('-I', '--min-x MIN', Integer, 'Min x value [Default: auto]') { |i|
+        options[:min_x] = i
+      }
+
+      opts.on('-M', '--max-x MAX', Integer, 'Max x value [Default: auto]') { |m|
+        options[:max_x] = m
+      }
+
+      opts.on('-i', '--min-y MIN', Integer, 'Min y value [Default: auto]') { |i|
+        options[:min_y] = i
+      }
+
+      opts.on('-m', '--max-y MAX', Integer, 'Max y value [Default: auto]') { |m|
+        options[:max_y] = m
+      }
+
+      opts.separator ''
+
+      opts.on('-l', '--linear-fit', "Add linear fit line (ignores '-s')") {
+        options[:linear_fit] = true
+      }
+
+      opts.on('-L', '--linear-fit-only', "Plot linear fit only (implies '-l')") {
+        options[:linear_fit] = :only
+      }
+
+      opts.separator ''
+      opts.separator 'Generic options:'
+
+      opts.on('-h', '--help', 'Print this help message and exit') {
+        abort opts.to_s
+      }
+
+      opts.on('--version', 'Print program version and exit') {
+        abort "#{File.basename($0)} v#{VERSION}"
+      }
+    }
+  end
+
+  def column_ranges(string)
+    string.split(',').map { |range|
+      range =~ /\A(\d+)-(\d+)\z/ ? ($1.to_i..$2.to_i).to_a : range.to_i
+    }.flatten.uniq
+  end
+
+end
+
+PlotCSV.run if $0 == __FILE__
