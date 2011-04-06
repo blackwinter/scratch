@@ -94,7 +94,7 @@ module PlotCSV
         } unless fit == :only
 
         plot.data(
-          Array.new(values.size) { |i| i + 1 }.zip(values).llsq.map { |_, i| i }
+          values.llsq.map { |_, i| i }
         ) { |ds|
           ds.with  = 'lines'
           ds.title = "#{label} (fit)"
