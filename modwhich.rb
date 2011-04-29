@@ -6,20 +6,20 @@
 # modwhich -- Find the location of a library. Solution for Ruby Quiz          #
 # "Where the Required Things Are" (#175) by Matthew Moss, 2008/08/29.         #
 #                                                                             #
-# Copyright (C) 2008 Jens Wille <jens.wille@uni-koeln.de>                     #
+# Copyright (C) 2008-2011 Jens Wille <jens.wille@uni-koeln.de>                #
 #                                                                             #
 # modwhich is free software; you can redistribute it and/or modify it under   #
-# the terms of the GNU General Public License as published by the Free        #
+# the terms of the GNU Affero General Public License as published by the Free #
 # Software Foundation; either version 3 of the License, or (at your option)   #
 # any later version.                                                          #
 #                                                                             #
 # modwhich is distributed in the hope that it will be useful, but WITHOUT     #
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or       #
-# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for    #
-# more details.                                                               #
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License #
+# for more details.                                                           #
 #                                                                             #
-# You should have received a copy of the GNU General Public License along     #
-# with modwhich. If not, see <http://www.gnu.org/licenses/>.                  #
+# You should have received a copy of the GNU Affero General Public License    #
+# along with modwhich. If not, see <http://www.gnu.org/licenses/>.            #
 #                                                                             #
 ###############################################################################
 #++
