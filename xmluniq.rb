@@ -1,0 +1,340 @@
+#! /usr/bin/ruby
+
+#--
+###############################################################################
+#                                                                             #
+# xmluniq -- Filter duplicate records from XML                                #
+#                                                                             #
+# Copyright (C) 2011 Jens Wille                                               #
+#                                                                             #
+# Authors:                                                                    #
+#     Jens Wille <jens.wille@uni-koeln.de>                                    #
+#                                                                             #
+# xmluniq is free software; you can redistribute it and/or modify it under    #
+# the terms of the GNU Affero General Public License as published by the Free #
+# Software Foundation; either version 3 of the License, or (at your option)   #
+# any later version.                                                          #
+#                                                                             #
+# xmluniq is distributed in the hope that it will be useful, but WITHOUT ANY  #
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS   #
+# FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for     #
+# more details.                                                               #
+#                                                                             #
+# You should have received a copy of the GNU Affero General Public License    #
+# along with xmluniq. If not, see <http://www.gnu.org/licenses/>.             #
+#                                                                             #
+###############################################################################
+#++
+
+require 'optparse'
+require 'tempfile'
+require 'erb'
+
+begin
+  require 'rubygems'
+rescue LoadError
+end
+
+begin
+  require 'libxslt'
+  XML = LibXML::XML
+rescue LoadError
+end
+
+# == Comparison with <tt>uniq(1)</tt>
+#
+# XmlUniq recognizes duplicate records across whole file (not
+# only consecutive ones) and interprets the <tt>--repeated</tt>
+# option differently.
+#
+# <tt>uniq(1)</tt> (+U+) vs. XmlUniq (+X+):
+#
+#                  | a a a b b c b b a
+#   ----------------------------------
+#   (default)      | U     U   U U   U
+#                  | X     X   X
+#   ----------------------------------
+#   --repeated     | U     U     U
+#                  |   X X   X   X X X
+#   ----------------------------------
+#   --all-repeated | U U U U U   U U
+#                  | X X X X X   X X X
+#   ----------------------------------
+#   --unique       |           U     U
+#                  |           X
+#
+# == TODO
+#
+# - namespaces?
+# - encoding detection?
+# - cdata-section-elements?
+# - preserve original XML declaration?
+# - node comparison should include attributes and tag names!
+#   [fn:key uses string(node), which only consists of text()]
+
+module XmlUniq
+
+  extend self
+
+  NAME     = File.basename($0)
+
+  VERSION  = '0.0.1'
+
+  USAGE    = "Usage: #{$0} [-h|--help] [options] [<file>]"
+
+  DEFAULTS = {
+    :path          => '/*/*',
+    :key           => '.',
+    :last          => false,
+    :dup           => false,
+    :all           => false,
+    :only_records  => false,
+    :only_matching => false,
+    :encoding      => 'UTF-8',
+    :input         => '-',
+    :output        => '-',
+    :indent        => false,
+    :strip_space   => false,
+    :print_xslt    => false,
+    :print_cmd     => false,
+    :dry_run       => false
+  }
+
+  def run(xslt, argv = ARGV)
+    options = parse_options(argv)
+
+    xslt = ERB.new(xslt).result(binding).strip
+    warn xslt if options[:print_xslt]
+
+    if respond_to?(runner = "run_#{processor}", true)
+      send(runner, xslt, options)
+    elsif processor
+      abort "Don't know how to run processor: #{processor}"
+    else
+      abort 'No processor to run!'
+    end
+  end
+
+  private
+
+  def processor
+    defined?(@processor) ? @processor : @processor =
+      !%x{which xsltproc}.empty? ? :xsltproc :
+      defined?(LibXSLT::XSLT)    ? :libxslt  : nil
+  end
+
+  def run_xsltproc(xslt, options)
+    cmd = [processor.to_s,
+      '--output',      options[:output],
+      '--encoding',    options[:encoding],
+      xslt_file(xslt), options[:input]
+    ]
+
+    warn cmd.join(' ') if options[:print_cmd]
+    system(*cmd) or abort "Could not execute command: #{cmd.join(' ')}" unless options[:dry_run]
+  end
+
+  def run_libxslt(xslt, options)
+    args = options[:input] == '-' ? [:io, STDIN] : [:file, options[:input]]
+
+    encoding = begin
+      LibXML::XML::Encoding.const_get(options[:encoding].upcase.tr('-', '_'))
+    rescue NameError
+      warn "Unsupported encoding: #{options[:encoding]}. Defaulting to UTF-8."
+      LibXML::XML::Encoding::UTF_8
+    end
+
+    unless options[:dry_run]
+      xml = LibXSLT::XSLT::Stylesheet.new(
+        LibXML::XML::Document.string(xslt)
+      ).apply(LibXML::XML::Document.send(
+        *args << { :encoding => encoding }
+      ))
+
+      options[:output] == '-' ? STDOUT.write(xml) :
+      File.open(options[:output], 'w') { |out| out.write(xml) }
+    end
+  end
+
+  def xslt_file(xslt)
+    tempfile = Tempfile.new([NAME, '.xslt'])
+    tempfile.write(xslt)
+    tempfile.path
+  ensure
+    tempfile.close if tempfile
+  end
+
+  def parse_options(arguments, options = DEFAULTS)
+    option_parser(options).parse!(arguments)
+
+    input = arguments.shift
+    options[:input] = input if input
+
+    abort USAGE unless arguments.empty?
+
+    options
+  end
+
+  def option_parser(options)
+    OptionParser.new { |opts|
+      opts.banner = USAGE
+
+      opts.separator ''
+      opts.separator 'Options:'
+
+      opts.on('-p', '--path XPATH', 'Use XPATH to determine what constitutes', "a record [Default: '#{options[:path]}']") { |xpath|
+        options[:path] = xpath
+      }
+
+      opts.on('-k', '--key XPATH', 'Use XPATH to determine the part of', "a record to compare on [Default: '#{options[:key]}']") { |xpath|
+        options[:key] = xpath
+      }
+
+      opts.separator ''
+
+      opts.on('-l', '--[no-]last', 'Keep last, not first, in a series', "of duplicate records [Default: #{options[:last]}]") { |last|
+        options[:last] = last
+      }
+
+      opts.separator ''
+
+      opts.on('-d', '--repeated', 'Only print duplicate records') {
+        options[:dup] = true
+        options[:all] = false
+      }
+
+      opts.on('-D', '--all-repeated', 'Print all duplicate records') {
+        options[:dup] = true
+        options[:all] = true
+      }
+
+      opts.on('-u', '--unique', 'Only print unique records') {
+        options[:dup] = false
+        options[:all] = true
+      }
+
+      opts.separator ''
+
+      opts.on('-r', '--only-records', 'Only print elements matching PATH (records)') {
+        options[:only_records] = true
+      }
+
+      opts.on('-m', '--only-matching', 'Only print records matching PATH[KEY]') {
+        options[:only_matching] = true
+      }
+
+      opts.separator ''
+      opts.separator 'Input options:'
+
+      opts.on('-e', '--encoding ENCODING', "The encoding of the input [Default: '#{options[:encoding]}']") { |encoding|
+        options[:encoding] = encoding
+      }
+
+      opts.separator ''
+      opts.separator 'Output options:'
+
+      opts.on('-o', '--output FILE', 'Write output to FILE instead of STDOUT') { |file|
+        options[:output] = file
+      }
+
+      opts.separator ''
+
+      opts.on('-i', '--[no-]indent', "Indent the result tree nicely [Default: #{options[:indent]}]") { |indent|
+        options[:indent] = indent
+      }
+
+      opts.on('-w', '--[no-]strip-space', "Strip whitespace from the tree [Default: #{options[:strip_space]}]", 'NOTE: This option may also affect the way', 'records are compared!') { |strip_space|
+        options[:strip_space] = strip_space
+      }
+
+      opts.separator ''
+      opts.separator 'Debug options:'
+
+      opts.on('-X', '--print-xslt', 'Print the generated XSLT stylesheet on STDERR') {
+        options[:print_xslt] = true
+      }
+
+      opts.on('-C', '--print-cmd', 'Print the executed command on STDERR') {
+        options[:print_cmd] = true
+      } if processor == :xsltproc
+
+      opts.separator ''
+
+      opts.on('-N', '--dry-run', "Don't run the actual transformation, just print", 'debug information (if any)') {
+        options[:dry_run] = true
+      }
+
+      opts.separator ''
+      opts.separator 'Generic options:'
+
+      opts.on('-h', '--help', 'Print this help message and exit') {
+        abort opts.to_s
+      }
+
+      opts.on('--version', 'Print program version and exit') {
+        abort "#{NAME} v#{XmlUniq::VERSION}"
+      }
+    }
+  end
+
+end
+
+XmlUniq.run(DATA.read) if $0 == __FILE__
+
+__END__
+<%
+  order = %w[keep drop]
+  order.reverse! if options[:dup]
+
+  key     = "key('key', #{options[:key]})"
+  match   = "#{options[:path]}[#{options[:key]}]"
+  pattern = options[:all] ? "#{key}[2]" : "generate-id() != generate-id(#{key}[#{options[:last] ? 'last()' : '1'}])"
+%>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <!-- <%= NAME %> v<%= XmlUniq::VERSION %> / <%= options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ') %> -->
+
+  <!-- set output options -->
+  <xsl:output indent="<%= options[:indent] ? 'yes' : 'no' %>" encoding="<%= options[:encoding] %>" />
+
+  <!-- configure whitespace stripping -->
+  <% if options[:strip_space] %><xsl:strip-space elements="*" /><% else %><!-- (default) --><% end %>
+
+  <!-- define key for record comparison -->
+  <xsl:key name="key" match="<%= match %>" use="<%= options[:key] %>" />
+
+  <!-- define named templates -->
+  <xsl:template name="keep"><xsl:copy-of select="." /></xsl:template>
+  <xsl:template name="drop" />
+
+  <!-- preserve processing instructions and comments -->
+  <xsl:template match="processing-instruction()|comment()">
+    <xsl:call-template name="keep" />
+  </xsl:template>
+
+  <!-- identity transform -->
+  <xsl:template match="*">
+    <xsl:copy>
+      <xsl:apply-templates mode="uniq" />
+    </xsl:copy>
+  </xsl:template>
+
+  <!-- handle non-record elements -->
+  <xsl:template priority="0" mode="uniq" match="*">
+    <xsl:call-template name="<%= options[:only_records] ? 'drop' : 'keep' %>" />
+  </xsl:template>
+
+  <!-- handle non-matching records -->
+  <xsl:template priority="1" mode="uniq" match="<%= options[:path] %>">
+    <xsl:call-template name="<%= options[:only_matching] ? 'drop' : 'keep' %>" />
+  </xsl:template>
+
+  <!-- handle unique records -->
+  <xsl:template priority="2" mode="uniq" match="<%= match %>">
+    <xsl:call-template name="<%= order.first %>" />
+  </xsl:template>
+
+  <!-- handle duplicate records -->
+  <xsl:template priority="3" mode="uniq" match="<%= match %>[<%= pattern %>]">
+    <xsl:call-template name="<%= order.last %>" />
+  </xsl:template>
+</xsl:stylesheet>
