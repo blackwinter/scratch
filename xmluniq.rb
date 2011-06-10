@@ -30,22 +30,10 @@ require 'optparse'
 require 'tempfile'
 require 'erb'
 
-begin
-  require 'rubygems'
-rescue LoadError
-end
-
-begin
-  require 'libxslt'
-  XML = LibXML::XML
-rescue LoadError
-end
-
 # == Comparison with <tt>uniq(1)</tt>
 #
-# XmlUniq recognizes duplicate records across whole file (not
-# only consecutive ones) and interprets the <tt>--repeated</tt>
-# option differently.
+# XmlUniq recognizes duplicate records across whole file (not only consecutive
+# ones) and interprets the <tt>--repeated</tt> option differently.
 #
 # <tt>uniq(1)</tt> (+U+) vs. XmlUniq (+X+):
 #
@@ -63,22 +51,45 @@ end
 #   --unique       |           U     U
 #                  |           X
 #
+#
+# == Processors
+#
+# XmlUniq can make use of different XSLT processors to achieve its goals.
+# Currently supported and tried in this order are:
+#
+# +libxslt+::  Requires the {libxslt bindings}[https://github.com/xml4r/libxslt-ruby].
+# +xsltproc+:: Requires the {xsltproc program}[http://xmlsoft.org/xslt/xsltproc2.html].
+#
+#
+# === Note
+#
+# Node comparison is based on xsl:key[http://www.w3.org/TR/xslt#function-key],
+# which converts the key value (specified by the <tt>--key</tt> option) to a
+# string[http://www.w3.org/TR/xpath#function-string]. When the key happens to
+# be a node (which is the default setting), its string value includes only the
+# text (and whitespace) from its child nodes; neither attributes nor tag names
+# are taken into account.
+#
+# To remedy this, the +libxslt+ processor registers an extension function that
+# returns a node's *full* string representation if the bindings support the
+# registration of such extension functions. The +xsltproc+ processor, however,
+# does not support this extension at all.
+#
+#
 # == TODO
 #
 # - namespaces?
 # - encoding detection?
 # - cdata-section-elements?
 # - preserve original XML declaration?
-# - node comparison should include attributes and tag names!
-#   [fn:key uses string(node), which only consists of text()]
 
 module XmlUniq
 
   extend self
 
-  NAME     = File.basename($0)
+  NAME     = File.basename($0, '.rb')
 
-  VERSION  = '0.0.1'
+  VERSION  = '0.0.2'
 
   USAGE    = "Usage: #{$0} [-h|--help] [options] [<file>]"
 
@@ -100,6 +111,8 @@ module XmlUniq
     :dry_run       => false
   }
 
+  NAMESPACE_URI = "http://#{NAME}.ext"
+
   def run(xslt, argv = ARGV)
     options = parse_options(argv)
 
@@ -119,19 +132,32 @@ module XmlUniq
 
   def processor
     defined?(@processor) ? @processor : @processor =
-      !%x{which xsltproc}.empty? ? :xsltproc :
-      defined?(LibXSLT::XSLT)    ? :libxslt  : nil
+      have_libxslt? ? :libxslt : have_xsltproc? ? :xsltproc : nil
   end
 
-  def run_xsltproc(xslt, options)
-    cmd = [processor.to_s,
-      '--output',      options[:output],
-      '--encoding',    options[:encoding],
-      xslt_file(xslt), options[:input]
-    ]
+  def have_libxslt?
+    defined?(@have_libxslt) ? @have_libxslt : @have_libxslt = begin
+      begin
+        require 'rubygems'
+        gem 'blackwinter-libxslt'
+      rescue LoadError
+      end
 
-    warn cmd.join(' ') if options[:print_cmd]
-    system(*cmd) or abort "Could not execute command: #{cmd.join(' ')}" unless options[:dry_run]
+      require 'libxslt'
+      true
+    rescue LoadError
+      false
+    end
+  end
+
+  def have_libxslt_register?
+    defined?(@have_libxslt_register) ? @have_libxslt_register : @have_libxslt_register =
+      have_libxslt? && LibXSLT::XSLT.respond_to?(:register)
+  end
+
+  def have_xsltproc?
+    defined?(@have_xsltproc) ? @have_xsltproc : @have_xsltproc =
+      !%x{which xsltproc}.empty?
   end
 
   def run_libxslt(xslt, options)
@@ -144,7 +170,14 @@ module XmlUniq
       LibXML::XML::Encoding::UTF_8
     end
 
+    LibXSLT::XSLT.register(NAMESPACE_URI, 'node-string') { |args|
+      args.join('|')
+    } if have_libxslt_register?
+
     unless options[:dry_run]
+      # LibXSLT::XSLT::Stylesheet expects top-level constant XML (old libxml-ruby interface)
+      Object.const_set(:XML, LibXML::XML) unless Object.const_defined?(:XML) || have_libxslt_register?
+
       xml = LibXSLT::XSLT::Stylesheet.new(
         LibXML::XML::Document.string(xslt)
       ).apply(LibXML::XML::Document.send(
@@ -154,6 +187,17 @@ module XmlUniq
       options[:output] == '-' ? STDOUT.write(xml) :
       File.open(options[:output], 'w') { |out| out.write(xml) }
     end
+  end
+
+  def run_xsltproc(xslt, options)
+    cmd = [processor.to_s,
+      '--output',      options[:output],
+      '--encoding',    options[:encoding],
+      xslt_file(xslt), options[:input]
+    ]
+
+    warn cmd.join(' ') if options[:print_cmd]
+    system(*cmd) or abort "Could not execute command: #{cmd.join(' ')}" unless options[:dry_run]
   end
 
   def xslt_file(xslt)
@@ -286,12 +330,15 @@ __END__
   order = %w[keep drop]
   order.reverse! if options[:dup]
 
-  key     = "key('key', #{options[:key]})"
+  use = options[:key]
+  use = "ext:node-string(#{use})" if have_libxslt_register?
+
+  key     = "key('key', #{use})"
   match   = "#{options[:path]}[#{options[:key]}]"
   pattern = options[:all] ? "#{key}[2]" : "generate-id() != generate-id(#{key}[#{options[:last] ? 'last()' : '1'}])"
 %>
-<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
-  <!-- <%= NAME %> v<%= XmlUniq::VERSION %> / <%= options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ') %> -->
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"<%= %Q{ xmlns:ext="#{NAMESPACE_URI}"} if have_libxslt_register? %>>
+  <!-- <%= NAME %> v<%= VERSION %> [<%= processor %>] / <%= options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ') %> -->
 
   <!-- set output options -->
   <xsl:output indent="<%= options[:indent] ? 'yes' : 'no' %>" encoding="<%= options[:encoding] %>" />
@@ -300,7 +347,7 @@ __END__
   <% if options[:strip_space] %><xsl:strip-space elements="*" /><% else %><!-- (default) --><% end %>
 
   <!-- define key for record comparison -->
-  <xsl:key name="key" match="<%= match %>" use="<%= options[:key] %>" />
+  <xsl:key name="key" match="<%= match %>" use="<%= use %>" />
 
   <!-- define named templates -->
   <xsl:template name="keep"><xsl:copy-of select="." /></xsl:template>
