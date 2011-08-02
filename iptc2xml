@@ -1,0 +1,69 @@
+#! /usr/bin/python
+
+import os, re, sys, glob, iptcdata
+
+reload(sys)
+sys.setdefaultencoding('utf-8')
+
+def print_tag(t, l = 0, v = None):
+  i = '  ' * l
+
+  if v is None:
+    print '%s<%s>' % (i, t)
+  else:
+    print '%s<%s>%s</%s>' % (i, t, v, t)
+
+def print_row(a):
+  try:
+    f, d = iptcdata.open(a), {}
+  except ValueError:
+    return
+
+  for ds in f.datasets:
+    k, v = ds.title, ds.value
+
+    if isinstance(v, str):
+      v = v.decode('iso-8859-1')
+
+    if k in d:
+      i = d[k]
+
+      if isinstance(i, list):
+        d[k].append(v)
+      else:
+        d[k] = [i, v]
+    else:
+      d[k] = v
+
+  f.close()
+
+  if (len(d) == 0):
+    return
+
+  print_tag('row')
+
+  for k, v in d.iteritems():
+    t = re.sub('[^\w:.-]', '_', k)
+
+    if isinstance(v, list):
+      print_tag(t, 1)
+
+      for i in v:
+        print_tag(t, 2, i)
+
+      print_tag('/%s' % t, 1)
+    else:
+      print_tag(t, 1, v)
+
+  print_tag('/row')
+
+print_tag('root')
+
+for a in sys.argv[1:]:
+  if os.path.isdir(a):
+    for i in glob.iglob(os.path.join(a, '*.jpg')):
+      print_row(i)
+  else:
+    print_row(a)
+
+print_tag('/root')
