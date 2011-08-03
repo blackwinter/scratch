@@ -16,7 +16,8 @@ def print_tag(t, l = 0, v = None):
 def print_row(a):
   try:
     f, d = iptcdata.open(a), {}
-  except ValueError:
+  except (IOError, ValueError) as err:
+    print >> sys.stderr, err
     return
 
   for ds in f.datasets:
