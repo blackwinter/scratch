@@ -16,15 +16,20 @@ rescue LoadError => err
   end
 end
 
-jfile  = java.io.File
-reader = com.drew.imaging.jpeg.JpegMetadataReader
+JavaFile = java.io.File
+JavaJpeg = com.drew.imaging.jpeg
 
-puts '<root>'
+def print_row(file)
+  metadata = begin
+    JavaJpeg.JpegMetadataReader.read_metadata(JavaFile.new(file))
+  rescue JavaJpeg.JpegProcessingException => err
+    warn "#{err}: #{file}"
+    return
+  end
 
-ARGV.each { |file|
   puts '<row>'
 
-  reader.read_metadata(jfile.new(file)).directory_iterator.each { |directory|
+  metadata.directory_iterator.each { |directory|
     directory.tag_iterator.each { |tag|
       name = "#{directory.name}_#{tag.tag_name}".gsub(/[^\w:.-]/, '_')
       puts '  <%s>%s</%s>' % [name, tag.description, name]
@@ -32,6 +37,16 @@ ARGV.each { |file|
   }
 
   puts '</row>'
-}
+end
+
+puts '<root>'
+
+if ARGV.delete('-r') || ARGV.delete('--recursive')
+  require 'find'
+
+  Find.find(*ARGV) { |file| print_row(file) if File.file?(file) }
+else
+  ARGV.each { |file| print_row(file) }
+end
 
 puts '</root>'
