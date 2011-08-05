@@ -20,6 +20,11 @@ JavaFile = java.io.File
 JavaJpeg = com.drew.imaging.jpeg
 
 def print_row(file)
+  unless File.file?(file)
+    warn "Not a file: #{file}"
+    return
+  end
+
   metadata = begin
     JavaJpeg.JpegMetadataReader.read_metadata(JavaFile.new(file))
   rescue JavaJpeg.JpegProcessingException => err
@@ -31,7 +36,7 @@ def print_row(file)
 
   metadata.directory_iterator.each { |directory|
     directory.tag_iterator.each { |tag|
-      name = "#{directory.name}_#{tag.tag_name}".gsub(/[^\w:.-]/, '_')
+      name = "#{directory.name}.#{tag.tag_name}".gsub(/[^\w:.-]/, '_')
       puts '  <%s>%s</%s>' % [name, tag.description, name]
     }
   }
@@ -44,7 +49,7 @@ puts '<root>'
 if ARGV.delete('-r') || ARGV.delete('--recursive')
   require 'find'
 
-  Find.find(*ARGV) { |file| print_row(file) if File.file?(file) }
+  Find.find(*ARGV) { |file| print_row(file) }
 else
   ARGV.each { |file| print_row(file) }
 end
