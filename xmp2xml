@@ -1,0 +1,68 @@
+#! /usr/bin/ruby
+
+require 'rubygems'
+require 'exifr'
+require 'xmp'
+
+if index = ARGV.index('-n') || ARGV.index('--namespaces')
+  key = ARGV.delete_at(index)
+  val = ARGV.delete_at(index) or abort "Value required for #{key}"
+end
+
+NAMESPACES = (val || '').split(',')
+
+def print_row(file)
+  unless File.file?(file)
+    warn "Not a file: #{file}"
+    return
+  end
+
+  xmp = begin
+    XMP.parse(EXIFR::JPEG.new(file))
+  rescue EXIFR::MalformedJPEG => err
+    warn "#{err}: #{file}"
+    return
+  end
+
+  namespaces  = xmp.namespaces
+  namespaces &= NAMESPACES unless NAMESPACES.empty?
+
+  puts '<row>'
+
+  namespaces.each { |name|
+    namespace = XMP::Namespace.new(xmp, name)
+
+    namespace.attributes.each { |attr|
+      tag = "#{name}.#{attr}".gsub(/[^\w:.-]/, '_')
+
+      value = namespace.send(:embedded_attribute,   attr) ||
+              namespace.send(:standalone_attribute, attr)
+
+      if value.is_a?(Array)
+        puts "  <#{tag}>"
+
+        value.each { |val|
+          puts '    <%s>%s</%s>' % [tag, val, tag]
+        }
+
+        puts "  </#{tag}>"
+      else
+        puts '  <%s>%s</%s>' % [tag, value, tag]
+      end
+    }
+  }
+
+  puts '</row>'
+end
+
+puts '<root>'
+
+if ARGV.delete('-r') || ARGV.delete('--recursive')
+  require 'find'
+
+  Find.find(*ARGV) { |file| print_row(file) }
+else
+  ARGV.each { |file| print_row(file) }
+end
+
+puts '</root>'
