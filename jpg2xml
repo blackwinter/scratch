@@ -1,0 +1,37 @@
+#! /usr/bin/jruby
+
+require 'java'
+
+JAVA_INCLUDE = ENV['JAVA_INCLUDE'] || '/usr/share/java'
+
+begin
+  require 'metadata-extractor'
+rescue LoadError => err
+  unless $:.include?(JAVA_INCLUDE)
+    $: << JAVA_INCLUDE
+    retry
+  else
+    abort "#{err.class}: #{err}\n\n" <<
+      'Metadata Extractor: http://drewnoakes.com/code/exif/'
+  end
+end
+
+jfile  = java.io.File
+reader = com.drew.imaging.jpeg.JpegMetadataReader
+
+puts '<root>'
+
+ARGV.each { |file|
+  puts '<row>'
+
+  reader.read_metadata(jfile.new(file)).directory_iterator.each { |directory|
+    directory.tag_iterator.each { |tag|
+      name = "#{directory.name}_#{tag.tag_name}".gsub(/[^\w:.-]/, '_')
+      puts '  <%s>%s</%s>' % [name, tag.description, name]
+    }
+  }
+
+  puts '</row>'
+}
+
+puts '</root>'
