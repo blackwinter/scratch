@@ -1,15 +1,80 @@
 #! /usr/bin/ruby
 
 require 'rubygems'
-require 'exifr'
-require 'xmp'
+require 'nokogiri'
+require 'set'
 
 if index = ARGV.index('-n') || ARGV.index('--namespaces')
   key = ARGV.delete_at(index)
   val = ARGV.delete_at(index) or abort "Value required for #{key}"
 end
 
-NAMESPACES = (val || '').split(',')
+NAMESPACES = Set.new((val || '').split(','))
+XAP_RE = %r{\Ahttp://ns\.adobe\.com/xap/1\.0/}
+
+class MalformedImage < StandardError; end
+
+def parse(file)
+  xmp = nil
+
+  File.open(file, 'rb') { |f|
+    class << f
+      def readbyte;  readchar; end unless method_defined?(:readbyte)
+      def readint;  (readbyte << 8) + readbyte; end
+      def readframe; read(readint - 2); end
+      def readsof;  [readint, readbyte, readint, readint, readbyte]; end
+      def next
+        c = readbyte while c != 0xFF
+        c = readbyte while c == 0xFF
+        c
+      end
+    end unless f.respond_to?(:readsof)
+
+    unless f.readbyte == 0xFF && f.readbyte == 0xD8  # SOI
+      raise MalformedImage, 'no start of image marker found'
+    end
+
+    while marker = f.next
+      case marker
+        when 0xC0..0xC3, 0xC5..0xC7, 0xC9..0xCB, 0xCD..0xCF  # SOF markers
+          length, _, _, _, components = f.readsof
+          next if length == 8 + components * 3
+
+          raise MalformedImage, 'frame length does not match number of components'
+        when 0xD9, 0xDA  # EOI, SOS
+          break
+        when 0xE1  # APP1
+          xmp = f.readframe
+          break if xmp =~ XAP_RE
+        else
+          f.readframe  # ignore frame
+      end
+    end
+  }
+
+  doc = Nokogiri.XML(xmp.split("\000")[1])
+  xml, namespaces = doc.root, {}
+
+  doc.collect_namespaces.each { |ns, url|
+    xml.add_namespace_definition(ns, url)
+
+    name = ns.sub(/\Axmlns:/, '')
+    namespaces[name] = {} if NAMESPACES.empty? || NAMESPACES.include?(name)
+  }
+
+  descriptions = xml.xpath('//rdf:Description')
+
+  namespaces.each { |name, attributes| descriptions.each { |desc|
+    desc.attributes.each { |attr_name, attr|
+      attributes[attr_name] = attr.text if attr.namespace.prefix.to_s == name
+    }
+
+    desc.xpath("./#{name}:*").each { |attr|
+      value = attr.xpath('./rdf:Bag|./rdf:Seq|./rdf:Alt').first or next
+      attributes[attr.name] = value.xpath('./rdf:li').map { |i| i.text }
+    }
+  } }
+end
 
 def print_row(file)
   unless File.file?(file)
@@ -17,26 +82,18 @@ def print_row(file)
     return
   end
 
-  xmp = begin
-    XMP.parse(EXIFR::JPEG.new(file))
-  rescue EXIFR::MalformedJPEG => err
+  namespaces = begin
+    parse(file)
+  rescue MalformedImage => err
     warn "#{err}: #{file}"
     return
   end
 
-  namespaces  = xmp.namespaces
-  namespaces &= NAMESPACES unless NAMESPACES.empty?
-
   puts '<row>'
 
-  namespaces.each { |name|
-    namespace = XMP::Namespace.new(xmp, name)
-
-    namespace.attributes.each { |attr|
+  namespaces.each { |name, namespace|
+    namespace.each { |attr, value|
       tag = "#{name}.#{attr}".gsub(/[^\w:.-]/, '_')
-
-      value = namespace.send(:embedded_attribute,   attr) ||
-              namespace.send(:standalone_attribute, attr)
 
       if value.is_a?(Array)
         puts "  <#{tag}>"
