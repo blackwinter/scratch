@@ -89,7 +89,7 @@ module XmlUniq
 
   NAME     = File.basename($0, '.rb')
 
-  VERSION  = '0.0.2'
+  VERSION  = '0.0.3'
 
   USAGE    = "Usage: #{$0} [-h|--help] [options] [<file>]"
 
@@ -122,9 +122,9 @@ module XmlUniq
     if respond_to?(runner = "run_#{processor}", true)
       send(runner, xslt, options)
     elsif processor
-      abort "Don't know how to run processor: #{processor}"
+      abort "Don't know how to run processor `#{processor}'."
     else
-      abort 'No processor to run!'
+      abort "No suitable processor found! Install the `libxslt-ruby' gem or the `xsltproc' program."
     end
   end
 
@@ -137,22 +137,24 @@ module XmlUniq
 
   def have_libxslt?
     defined?(@have_libxslt) ? @have_libxslt : @have_libxslt = begin
-      begin
-        require 'rubygems'
-        gem 'blackwinter-libxslt'
-      rescue LoadError
-      end
-
       require 'libxslt'
       true
     rescue LoadError
+      unless Object.const_defined?(:Gem)
+        begin
+          require 'rubygems'
+          retry
+        rescue LoadError
+        end
+      end
+
       false
     end
   end
 
   def have_libxslt_register?
     defined?(@have_libxslt_register) ? @have_libxslt_register : @have_libxslt_register =
-      have_libxslt? && LibXSLT::XSLT.respond_to?(:register)
+      have_libxslt? && LibXSLT::XSLT.respond_to?(:register_module_function)
   end
 
   def have_xsltproc?
@@ -170,8 +172,8 @@ module XmlUniq
       LibXML::XML::Encoding::UTF_8
     end
 
-    LibXSLT::XSLT.register(NAMESPACE_URI, 'node-string') { |args|
-      args.join('|')
+    LibXSLT::XSLT.register_module_function(NAMESPACE_URI, 'node-string') { |xp|
+      xp.to_a.join('|')
     } if have_libxslt_register?
 
     unless options[:dry_run]
