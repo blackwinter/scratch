@@ -1,294 +1,345 @@
 #! /usr/bin/ruby
 
+require 'set'
+require 'find'
+require 'stringio'
+
 require 'rubygems'
 require 'nokogiri'
 require 'builder'
 require 'exifr'
-require 'find'
-require 'set'
 
-if index = ARGV.index('-n') || ARGV.index('--namespaces')
-  key = ARGV.delete_at(index)
-  val = ARGV.delete_at(index) or abort "Value required for #{key}"
-end
+class XMP2XML
 
-NAMESPACES = Set.new((val || '').split(','))
+  NULL = "\0"
+  EXIF = "Exif#{NULL * 2}"
 
-XAP_RE = %r{\Ahttp://ns\.adobe\.com/xap/1\.0/}
+  XMP_RE = %r{\Ahttp://ns\.adobe\.com/xap/1\.0/}
 
-NULL = "\0"
-EXIF = "Exif#{NULL * 2}"
+  IPTC_TAGMAP = {
+    0   => :record_version,
+    3   => :object_type,
+    4   => :object_attribute,
+    5   => :object_name,
+    7   => :edit_status,
+    8   => :editorial_update,
+    10  => :urgency,
+    12  => :subject,
+    15  => :category,
+    20  => :supp_category,
+    22  => :fixture_id,
+    25  => :keywords,
+    26  => :location_code,
+    27  => :location_name,
+    30  => :release_date,
+    35  => :release_time,
+    37  => :expiration_date,
+    38  => :expiration_time,
+    40  => :special_instructions,
+    42  => :action_advised,
+    45  => :reference_service,
+    47  => :reference_date,
+    50  => :reference_number,
+    55  => :date_created,
+    60  => :time_created,
+    62  => :digitization_date,
+    63  => :digitization_time,
+    65  => :program,
+    70  => :program_version,
+    75  => :object_cycle,
+    80  => :byline,
+    85  => :byline_title,
+    90  => :city,
+    92  => :sub_location,
+    95  => :province_state,
+    100 => :country_code,
+    101 => :country_name,
+    103 => :transmission_reference,
+    105 => :headline,
+    110 => :credit,
+    115 => :source,
+    116 => :copyright,
+    118 => :contact,
+    120 => :caption,
+    122 => :writer,
+    125 => :rasterized_caption,
+    130 => :image_type,
+    131 => :image_orientation,
+    135 => :language,
+    150 => :audio_type,
+    151 => :audio_rate,
+    152 => :audio_resolution,
+    153 => :audio_duration,
+    154 => :audio_outcue,
+    200 => :preview_format,
+    201 => :preview_version,
+    202 => :preview
+  }
 
-IPTC_TAGMAP = {
-  0   => :record_version,
-  3   => :object_type,
-  4   => :object_attribute,
-  5   => :object_name,
-  7   => :edit_status,
-  8   => :editorial_update,
-  10  => :urgency,
-  12  => :subject,
-  15  => :category,
-  20  => :supp_category,
-  22  => :fixture_id,
-  25  => :keywords,
-  26  => :location_code,
-  27  => :location_name,
-  30  => :release_date,
-  35  => :release_time,
-  37  => :expiration_date,
-  38  => :expiration_time,
-  40  => :special_instructions,
-  42  => :action_advised,
-  45  => :reference_service,
-  47  => :reference_date,
-  50  => :reference_number,
-  55  => :date_created,
-  60  => :time_created,
-  62  => :digitization_date,
-  63  => :digitization_time,
-  65  => :program,
-  70  => :program_version,
-  75  => :object_cycle,
-  80  => :byline,
-  85  => :byline_title,
-  90  => :city,
-  92  => :sub_location,
-  95  => :province_state,
-  100 => :country_code,
-  101 => :country_name,
-  103 => :transmission_reference,
-  105 => :headline,
-  110 => :credit,
-  115 => :source,
-  116 => :copyright,
-  118 => :contact,
-  120 => :caption,
-  122 => :writer,
-  125 => :rasterized_caption,
-  130 => :image_type,
-  131 => :image_orientation,
-  135 => :language,
-  150 => :audio_type,
-  151 => :audio_rate,
-  152 => :audio_resolution,
-  153 => :audio_duration,
-  154 => :audio_outcue,
-  200 => :preview_format,
-  201 => :preview_version,
-  202 => :preview
-}
+  class << self
 
-class MalformedImage < StandardError; end
+    def builder(options = {})
+      builder = Builder::XmlMarkup.new({
+        :target => STDOUT, :indent => 2
+      }.merge(options))
 
-class EXIFR::TIFF::Orientation
-  attr_reader :type, :value
-end
+      builder.instruct!
 
-class StringIO
-  alias_method :readbyte, :readchar unless method_defined?(:readbyte)
-end
+      block_given? ? builder.root { yield builder } : builder
+    end
 
-class File
-
-  alias_method :readbyte, :readchar unless method_defined?(:readbyte)
-
-  def readint
-    (readbyte << 8) + readbyte
-  end
-
-  def readframe
-    read(readint - 2)
-  end
-
-  def readsof
-    [readint, readbyte, readint, readint, readbyte]
-  end
-
-  def next
-    byte = readbyte while byte != 0xFF
-    byte = readbyte while byte == 0xFF
-    byte
-  end
-
-end
-
-def parse_jpeg(f, namespaces)
-  xmp = exif = iptc = nil
-
-  while marker = f.next
-    case marker
-      when 0xC0..0xC3, 0xC5..0xC7, 0xC9..0xCB, 0xCD..0xCF  # SOF markers
-        length, _, _, _, components = f.readsof
-        next if length == 8 + components * 3
-
-        raise MalformedImage, 'Frame length does not match number of components'
-      when 0xD9, 0xDA  # EOI, SOS
-        break
-      when 0xE1  # APP1
-        frame = f.readframe
-
-        if frame =~ XAP_RE
-          unless xmp = frame.split(NULL)[1]
-            exif && iptc ? break : next
-          end
-
-          doc = Nokogiri.XML(xmp)
-          xml, names = doc.root, []
-
-          doc.collect_namespaces.each { |ns, url|
-            xml.add_namespace_definition(ns, url)
-
-            name = ns.sub(/\Axmlns:/, '')
-            names << name if NAMESPACES.empty? || NAMESPACES.include?(name)
-          }
-
-          descriptions = xml.xpath('//rdf:Description')
-
-          names.each { |name|
-            attributes = namespaces[name]
-
-            descriptions.each { |desc|
-              desc.attributes.each { |attr_name, attr|
-                attributes[attr_name] = attr.text if attr.namespace.prefix.to_s == name
-              }
-
-              desc.xpath("./#{name}:*").each { |attr|
-                value = attr.xpath('./rdf:Bag|./rdf:Seq|./rdf:Alt').first or next
-                attributes[attr.name] = value.xpath('./rdf:li').map { |i| i.text }
-              }
-            }
-          }
-        elsif frame.slice!(0, 6) == EXIF
-          unless exif = frame and NAMESPACES.empty? || NAMESPACES.include?('exif')
-            xmp && iptc ? break : next
-          end
-
-          attributes = namespaces['exif_']
-          EXIFR::TIFF.new(StringIO.new(exif)).each { |ifd| attributes.update(ifd.to_hash) }
-        end
-
-        break if xmp && exif && iptc
-      when 0xED  # APP13
-        unless frame = f.readframe and NAMESPACES.empty? || NAMESPACES.include?('iptc')
-          xmp && exif ? break : next
-        end
-
-        iptc ||= namespaces['iptc_'] = begin
-          s, values = StringIO.new(frame), {}
-
-          until s.eof?
-            next unless s.readbyte == 0x1C
-
-            unless s.readbyte == 0x02
-              s.seek(-1, IO::SEEK_CUR)
-              next
-            end
-
-            tag_type = IPTC_TAGMAP[s.readbyte]
-
-            s.readbyte # throwaway value
-            new_value = s.read(s.readbyte)
-
-            if old_value = values[tag_type]
-              if old_value.is_a?(Array)
-                old_value << new_value
-                next
-              else
-                new_value = [old_value, new_value]
-              end
-            end
-
-            values[tag_type] = new_value
-          end
-
-          values
-        end
-
-        break if xmp && exif && iptc
+    def xmp2xml(file, target_namespaces = nil, builder = builder)
+      unless File.file?(file)
+        warn "#{file}: Not a file"
       else
-        f.readframe  # ignore frame
+        warn file if $VERBOSE
+
+        File.open(file, 'rb') { |io|
+          new(io).parse(target_namespaces)
+        }.to_xml(builder)
+      end
+    rescue ImageError => err
+      warn "#{file}: #{err}"
+    end
+
+  end
+
+  attr_reader :io, :namespaces
+  attr_accessor :target_namespaces
+
+  def initialize(io)
+    @io, @namespaces = io, Hash.new { |h, k| h[k] = {} }
+
+    @target = Hash.new { |h, k| h[k] =
+      target_namespaces.nil?   ||
+      target_namespaces.empty? ||
+      target_namespaces.include?(k.to_s)
+    }
+  end
+
+  def parse(target_namespaces = nil)
+    raise MalformedImage, 'No start of image marker found' unless type
+
+    unless respond_to?(parser = "parse_#{type}", true)
+      raise UnsupportedType, "Don't know how to handle image of type `#{type}'"
+    end
+
+    self.target_namespaces = target_namespaces
+    send(parser)
+    self
+  end
+
+  def to_xml(builder = self.class.builder)
+    builder.row { each { |name, attr, value|
+      tag = "#{name}.#{attr}".gsub(/[^\w:.-]/, '_')
+
+      case value
+        when Array
+          t = tag.sub(/s\z/, '')
+          builder.tag!(tag) { value.each { |v| builder.tag!(t, v) } }
+        when EXIFR::TIFF::Orientation
+          builder.tag!(tag) { %w[type value].each { |k|
+            builder.tag!(k, value.instance_variable_get("@#{k}").to_s)
+          } }
+        when String, Numeric, Date, Time
+          builder.tag!(tag, value)
+        else
+          warn "Don't know how to handle #{tag} of type #{value.class}: #{value.inspect}"
+      end
+    } }
+  end
+
+  def each
+    namespaces.sort.each { |namespace, attributes|
+      attributes.sort_by { |attribute, _| attribute.to_s }.
+        each { |attribute, value| yield namespace, attribute, value }
+    }
+  end
+
+  private
+
+  def type
+    defined?(@type) ? @type : @type = case [io.readbyte, io.readbyte]
+      when [0xFF, 0xD8] then :jpeg
+      when [0x49, 0x49] then :tiff if [io.readbyte, io.readbyte] == [0x2A, 0x00]
+      when [0x4D, 0x4D] then :tiff if [io.readbyte, io.readbyte] == [0x00, 0x2A]
     end
   end
+
+  def target?(namespace)
+    @target[namespace]
+  end
+
+  def parse_jpeg
+    while marker = io.next
+      case marker
+        when 0xC0..0xC3, 0xC5..0xC7, 0xC9..0xCB, 0xCD..0xCF  # SOF markers
+          length, _, _, _, components = io.readsof
+          next if length == 8 + components * 3
+
+          raise MalformedImage, 'Frame length does not match number of components'
+        when 0xD9, 0xDA  # EOI, SOS
+          break
+        when 0xE1  # APP1
+          frame = io.readframe
+
+          if frame =~ XMP_RE
+            collect_xmp(frame.split(NULL)[1])
+          elsif frame.slice!(0, 6) == EXIF
+            collect_exif(frame)
+          end
+        when 0xED  # APP13
+          collect_iptc(io.readframe)
+        else
+          io.readframe  # ignore frame
+      end
+    end
+  end
+
+  def parse_tiff(io = io)
+    attributes = namespaces['exif_'] if target?(:exif)
+
+    EXIFR::TIFF::Data.open(io) { |data|
+      ifd, offsets = EXIFR::TIFF::IFD.new(data), Set.new
+
+      while ifd && offsets.add?(ifd.offset)
+        hash, ifd = ifd.to_hash, ifd.next
+
+        collect_xmp(hash.delete(:xmp)) if hash.has_key?(:xmp)
+        attributes.update(hash) if attributes
+      end
+    }
+  rescue EXIFR::MalformedImage => err
+    raise MalformedImage, err.to_s
+  end
+
+  def collect_xmp(xmp)
+    doc = Nokogiri.XML(xmp)
+    xml, names = doc.root, []
+
+    return unless xml
+
+    doc.collect_namespaces.each { |ns, url|
+      xml.add_namespace_definition(ns, url)
+
+      name = ns.sub(/\Axmlns:/, '')
+      names << name if target?(name)
+    }
+
+    descriptions = xml.xpath('//rdf:Description')
+
+    names.each { |name|
+      attributes = namespaces[name]
+
+      descriptions.each { |desc|
+        desc.attributes.each { |attr_name, attr|
+          next unless namespace = attr.namespace
+          attributes[attr_name] = attr.text if namespace.prefix.to_s == name
+        }
+
+        desc.xpath("./#{name}:*").each { |node|
+          value = if bag = node.xpath('./rdf:Bag|./rdf:Seq|./rdf:Alt').first
+            bag.xpath('./rdf:li').map { |i| i.text }
+          elsif node.first_element_child.nil?
+            node.text
+          end
+
+          attributes[node.name] = value if value
+        }
+      }
+    }
+  end
+
+  def collect_exif(exif)
+    parse_tiff(StringIO.new(exif)) if exif
+  end
+
+  def collect_iptc(iptc)
+    return unless iptc && target?(:iptc)
+
+    attributes, io = namespaces['iptc_'], StringIO.new(iptc)
+
+    until io.eof?
+      next unless io.readbyte == 0x1C
+
+      unless io.readbyte == 0x02
+        io.seek(-1, IO::SEEK_CUR)
+        next
+      end
+
+      tag_type = IPTC_TAGMAP[io.readbyte]
+
+      io.readbyte # throwaway value
+      new_value = io.read(io.readbyte)
+
+      if old_value = attributes[tag_type]
+        if old_value.is_a?(Array)
+          old_value << new_value
+          next
+        end
+
+        new_value = [old_value, new_value]
+      end
+
+      attributes[tag_type] = new_value
+    end
+  end
+
+  module ParseUtil
+
+    def self.included(base)
+      unless base.method_defined?(:readbyte)
+        base.send(:alias_method, :readbyte, :readchar)
+      end
+    end
+
+    def readint
+      (readbyte << 8) + readbyte
+    end
+
+    def readframe
+      read(readint - 2)
+    end
+
+    def readsof
+      [readint, readbyte, readint, readint, readbyte]
+    end
+
+    def next
+      byte = readbyte while byte != 0xFF
+      byte = readbyte while byte == 0xFF
+      byte
+    end
+
+    [IO, StringIO].each { |klass|
+      klass.send(:include, self) unless klass.include?(self)
+    }
+
+  end
+
+  class ImageError < StandardError; end
+  class MalformedImage < ImageError; end
+  class UnsupportedType < ImageError; end
+
 end
 
-def parse_tiff(f, namespaces)
-  attributes = namespaces['exif_']
+if $0 == __FILE__
+  if index = ARGV.index('-n') || ARGV.index('--namespaces')
+    key = ARGV.delete_at(index)
+    val = ARGV.delete_at(index) or abort "Value required for #{key}"
 
-  EXIFR::TIFF::Data.open(f) { |data|
-    ifd = EXIFR::TIFF::IFD.new(data)
-    attributes.update(ifd.to_hash)
+    target_namespaces = Set.new(val.split(','))
+  end
 
-    offsets = Set.new([ifd.offset])
-
-    while ifd = ifd.next
-      break unless offsets.add?(ifd.offset)
-      attributes.update(ifd.to_hash)
+  XMP2XML.builder { |builder|
+    if ARGV.delete('-r') || ARGV.delete('--recursive')
+      Find.find(*ARGV) { |file|
+        XMP2XML.xmp2xml(file, target_namespaces, builder)
+      }
+    else
+      ARGV.each { |file|
+        XMP2XML.xmp2xml(file, target_namespaces, builder)
+      }
     end
   }
 end
-
-def parse(file)
-  namespaces = Hash.new { |h, k| h[k] = {} }
-
-  File.open(file, 'rb') { |f|
-    case [f.readbyte, f.readbyte]
-      when [0xFF, 0xD8]
-        parse_jpeg(f, namespaces)
-        true
-      when [0x49, 0x49]
-        if [f.readbyte, f.readbyte] == [0x2A, 0x00]
-          parse_tiff(f, namespaces)
-          true
-        end
-      when [0x4D, 0x4D]
-        if [f.readbyte, f.readbyte] == [0x00, 0x2A]
-          parse_tiff(f, namespaces)
-          true
-        end
-    end or raise MalformedImage, 'No start of image marker found'
-  }
-
-  namespaces
-end
-
-def print_row(file, xml)
-  unless File.file?(file)
-    warn "#{file}: Not a file"
-    return
-  end
-
-  namespaces = begin
-    parse(file)
-  rescue MalformedImage, EXIFR::MalformedImage => err
-    warn "#{file}: #{err}"
-    return
-  end
-
-  xml.row { namespaces.each { |name, attributes| attributes.each { |attr, value|
-    tag = "#{name}.#{attr}".gsub(/[^\w:.-]/, '_')
-
-    case value
-      when Array
-        t = tag.sub(/s\z/, '')
-        xml.tag!(tag) { value.each { |v| xml.tag!(t, v) } }
-      when EXIFR::TIFF::Orientation
-        xml.tag!(tag) { %w[type value].each { |k| xml.tag!(k, value.send(k).to_s) } }
-      when String, Numeric, Date, Time
-        xml.tag!(tag, value)
-      else
-        warn "#{file}: Can't handle #{tag} of type #{value.class}: #{value.inspect}"
-    end
-  } } }
-end
-
-xml = Builder::XmlMarkup.new(:target => STDOUT, :indent => 2)
-xml.instruct!
-
-xml.root {
-  if ARGV.delete('-r') || ARGV.delete('--recursive')
-    Find.find(*ARGV) { |file| print_row(file, xml) }
-  else
-    ARGV.each { |file| print_row(file, xml) }
-  end
-}
