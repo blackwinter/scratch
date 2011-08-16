@@ -5,6 +5,11 @@
 while [ -n "$1" ]; do
   m="$1"; shift
 
+  if [ ! -f "$m" ]; then
+    echo "No such file: $m"
+    exit 1
+  fi
+
   case "$m" in
     -f )
       f="$1"; shift
