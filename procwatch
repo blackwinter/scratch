@@ -1,0 +1,22 @@
+#! /bin/bash
+
+c=""; i=1; u="$0 [-c <count>] [-i <interval=$i>] <PID...>"
+
+while getopts :c:hi: opt; do
+  case "$opt" in
+    c ) c="$OPTARG";;
+    i ) i="$OPTARG";;
+    h ) echo "$u"; exit;;
+    * ) ((OPTIND--)); break;;
+  esac
+done
+
+shift $((OPTIND - 1))
+
+[ $# -eq 0 ] && echo "$u" && exit 1
+
+while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $h "$@"; do
+  [ -n "$c" ] && [ $((++j)) -ge $c ] && exit
+  sleep $i || exit 1
+  h="--no-headers"
+done
