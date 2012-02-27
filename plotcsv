@@ -27,9 +27,14 @@
 #++
 
 require 'optparse'
-
 require 'rubygems'
-require 'fastercsv'
+
+if RUBY_VERSION < '1.9'
+  require 'fastercsv'
+  CSV = FasterCSV
+else
+  require 'csv'
+end
 
 require 'nuggets/array/regression'
 require 'nuggets/numeric/limit'
@@ -68,12 +73,12 @@ module PlotCSV
 
     range, aggregate = options.values_at(:range, :aggregate)
 
-    fcsv_opts = { :headers => true, :converters => :numeric }
+    opts = { :headers => true, :converters => :numeric }
 
     Array(files).each { |file|
       names << File.basename(file, '.csv')
 
-      FasterCSV.foreach(file, fcsv_opts) { |row|
+      CSV.foreach(file, opts) { |row|
         row.each_with_index { |(label, value), index|
           next unless range.nil? || range.include?(index)
 
