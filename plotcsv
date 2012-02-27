@@ -53,6 +53,7 @@ module PlotCSV
   DEFAULTS = {
     :range      => nil,
     :aggregate  => nil,
+    :empty      => nil,
     :linear_fit => false,
     :terminal   => 'png',
     :style      => 'lines',
@@ -70,8 +71,7 @@ module PlotCSV
 
   def read(files, options = {})
     data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
-
-    range, aggregate = options.values_at(:range, :aggregate)
+    range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
 
     opts = { :headers => true, :converters => :numeric }
 
@@ -81,6 +81,11 @@ module PlotCSV
       CSV.foreach(file, opts) { |row|
         row.each_with_index { |(label, value), index|
           next unless range.nil? || range.include?(index)
+
+          if value.nil?
+            next if empty == false
+            value = empty
+          end
 
           if aggregate
             key = row.values_at(*aggregate) << label
@@ -167,6 +172,20 @@ module PlotCSV
 
       opts.on('-a', '--aggregate COLUMNS', 'Columns to aggregate on [Default: none]') { |c|
         options[:aggregate] = column_ranges(c)
+      }
+
+      opts.separator ''
+
+      opts.on('-S', '--skip-empty', 'Skip empty fields') {
+        options[:empty] = false
+      }
+
+      opts.on('-Z', '--zero-empty', 'Use zero for empty fields') {
+        options[:empty] = 0
+      }
+
+      opts.on('-E', '--empty INTEGER', Integer, 'Use INTEGER for empty fields') { |i|
+        options[:empty] = i
       }
 
       opts.separator ''
