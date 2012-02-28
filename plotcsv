@@ -54,6 +54,7 @@ module PlotCSV
     :range      => nil,
     :aggregate  => nil,
     :empty      => nil,
+    :delimiter  => ',',
     :linear_fit => false,
     :terminal   => 'png',
     :style      => 'lines',
@@ -73,7 +74,11 @@ module PlotCSV
     data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
     range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
 
-    opts = { :headers => true, :converters => :numeric }
+    opts = {
+      :headers    => true,
+      :converters => :numeric,
+      :col_sep    => options[:delimiter]
+    }
 
     Array(files).each { |file|
       names << File.basename(file, '.csv')
@@ -186,6 +191,12 @@ module PlotCSV
 
       opts.on('-E', '--empty INTEGER', Integer, 'Use INTEGER for empty fields') { |i|
         options[:empty] = i
+      }
+
+      opts.separator ''
+
+      opts.on('-d', '--delimiter STRING', "Field delimiter [Default: '#{options[:delimiter]}']") { |d|
+        options[:delimiter] = d
       }
 
       opts.separator ''
