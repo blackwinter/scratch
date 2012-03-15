@@ -63,7 +63,8 @@ module PlotCSV
     :min_x      => nil,
     :max_x      => nil,
     :min_y      => nil,
-    :max_y      => nil
+    :max_y      => nil,
+    :comment    => nil
   }
 
   def run(argv = ARGV)
@@ -116,9 +117,10 @@ module PlotCSV
     x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
     y = options[:height] || data.values.flatten.max.between(512, 768)
 
-    o = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
+    title, style, fit = names.join(' / '), *options.values_at(:style, :linear_fit)
 
-    style, fit = options.values_at(:style, :linear_fit)
+    opts = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
+    title << '\n' << opts.delete('"') unless opts.empty?
 
     Gnuplot.plot { |plot|
       plot.terminal "#{options[:terminal]} size #{x}, #{y}"
@@ -126,19 +128,15 @@ module PlotCSV
       plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
       plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
 
-      plot.title "#{Array(names).join(' / ')}#{"\\n#{o.delete('"')}" unless o.empty?}"
+      plot.title title
 
       data.sort.each { |label, values|
         plot.data(values) { |ds|
-          ds.with  = style
-          ds.title = label
+          ds.with, ds.title = style, label
         } unless fit == :only
 
-        plot.data(
-          values.llsq.map { |_, i| i }
-        ) { |ds|
-          ds.with  = 'lines'
-          ds.title = "#{label} (fit)"
+        plot.data(values.llsq.map { |_, i| i }) { |ds|
+          ds.with, ds.title = 'lines', "#{label} (fit)"
         } if fit
       }
     }
@@ -167,6 +165,12 @@ module PlotCSV
 
       opts.on('-s', '--style STYLE', "Gnuplot line style [Default: '#{options[:style]}']") { |s|
         options[:style] = s
+      }
+
+      opts.separator ''
+
+      opts.on('-C', '--comment COMMENT', 'Comment to add onto plot') { |c|
+        options[:comment] = c
       }
 
       opts.separator ''
