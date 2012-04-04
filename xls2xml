@@ -28,7 +28,7 @@ File.open(ARGV[0]) { |f|
   puts '<root>'
 
   Nokogiri.HTML(f).xpath('//tr').each { |tr|
-    id, field, value = tr.xpath('td').map(&:inner_text)
+    id, field, value = tr.xpath('td').map(&:inner_html)
 
     if row[element] && row[element] != id
       print_row(row)
