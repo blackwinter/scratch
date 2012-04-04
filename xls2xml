@@ -1,0 +1,44 @@
+#! /usr/bin/ruby
+
+require 'rubygems'
+require 'nokogiri'
+
+abort "Usage: #{$0} <xls> [<id-element>]" unless [1, 2].include?(ARGV.size)
+
+# <http://www.w3.org/TR/2006/REC-xml-20060816/#NT-Name>
+ELEMENT_START = %r{^[a-zA-Z_:]}
+ILLEGAL_CHARS = %r{[^\w:.-]}
+
+def print_row(row)
+  puts '<row>'
+
+  row.sort.each { |field, value|
+    field.insert(0, '_') unless field =~ ELEMENT_START
+    field.gsub!(ILLEGAL_CHARS, '_')
+
+    puts '  <%s>%s</%s>' % [field, value, field]
+  }
+
+  puts '</row>'
+end
+
+File.open(ARGV[0]) { |f|
+  element, row = ARGV[1] || 'id', {}
+
+  puts '<root>'
+
+  Nokogiri.HTML(f).xpath('//tr').each { |tr|
+    id, field, value = tr.xpath('td').map(&:inner_text)
+
+    if row[element] && row[element] != id
+      print_row(row)
+      row.clear
+    end
+
+    row[element], row[field] = id, value
+  }
+
+  print_row(row) unless row.empty?
+
+  puts '</root>'
+}
