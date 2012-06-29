@@ -5,7 +5,7 @@ for pid in $(pidof konsole); do
   omit="$omit -o $pid"
 done
 
-konsole --nofork 2> /dev/null &
+${MULTI_KONSOLE:-konsole} --nofork 2> /dev/null &
 
 cmd="pidof $omit konsole"; pid=""; i=0
 
@@ -36,8 +36,7 @@ while [ $# -gt 0 ]; do
   done
 
   $sess > /dev/null setTitle 1 "$($sess title 1) [$cmd]"
-  $sess > /dev/null sendText "$cmd
-"
+  $sess > /dev/null sendText "$cmd"$'\n'
 
   [ $# -gt 0 ] && sid="$($qdb /Konsole newSession 2> /dev/null)"
 done
