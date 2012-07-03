@@ -165,30 +165,28 @@ module XmlUniq
   def run_libxslt(xslt, options)
     args = options[:input] == '-' ? [:io, STDIN] : [:file, options[:input]]
 
-    encoding = begin
+    args << { :encoding => begin
       LibXML::XML::Encoding.const_get(options[:encoding].upcase.tr('-', '_'))
     rescue NameError
       warn "Unsupported encoding: #{options[:encoding]}. Defaulting to UTF-8."
       LibXML::XML::Encoding::UTF_8
-    end
+    end }
 
     LibXSLT::XSLT.register_module_function(NAMESPACE_URI, 'node-string') { |xp|
       xp.to_a.join('|')
     } if have_libxslt_register?
 
-    unless options[:dry_run]
-      # LibXSLT::XSLT::Stylesheet expects top-level constant XML (old libxml-ruby interface)
-      Object.const_set(:XML, LibXML::XML) unless Object.const_defined?(:XML) || have_libxslt_register?
+    return if options[:dry_run]
 
-      xml = LibXSLT::XSLT::Stylesheet.new(
-        LibXML::XML::Document.string(xslt)
-      ).apply(LibXML::XML::Document.send(
-        *args << { :encoding => encoding }
-      ))
+    # LibXSLT::XSLT::Stylesheet expects top-level constant XML (old libxml-ruby interface)
+    Object.const_set(:XML, LibXML::XML) unless Object.const_defined?(:XML) || have_libxslt_register?
 
-      options[:output] == '-' ? STDOUT.write(xml) :
-      File.open(options[:output], 'w') { |out| out.write(xml) }
-    end
+    xml = LibXSLT::XSLT::Stylesheet.new(
+      LibXML::XML::Document.string(xslt)
+    ).apply(LibXML::XML::Document.send(*args))
+
+    options[:output] == '-' ? STDOUT.write(xml) :
+    File.open(options[:output], 'w') { |out| out.write(xml) }
   end
 
   def run_xsltproc(xslt, options)
