@@ -1,11 +1,11 @@
-#! /usr/bin/ruby
+#! /usr/bin/env ruby
 
 #--
 ###############################################################################
 #                                                                             #
 # plotcsv -- Plot CSV data using Gnuplot                                      #
 #                                                                             #
-# Copyright (C) 2011 Jens Wille                                               #
+# Copyright (C) 2011-2012 Jens Wille                                          #
 #                                                                             #
 # Authors:                                                                    #
 #     Jens Wille <jens.wille@uni-koeln.de>                                    #
@@ -46,7 +46,7 @@ module PlotCSV
 
   extend self
 
-  VERSION = '0.0.1'
+  VERSION = '0.0.2'
 
   USAGE = "Usage: #{$0} [options] <csv>..."
 
@@ -75,14 +75,18 @@ module PlotCSV
     data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
     range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
 
-    opts = {
-      :headers    => true,
+    files, opts = Array(files), {
+      :headers => true,
       :converters => :numeric,
-      :col_sep    => options[:delimiter]
+      :col_sep => options[:delimiter]
     }
 
-    Array(files).each { |file|
-      names << File.basename(file, '.csv')
+    multiple = files.size > 1
+
+    files.each { |file|
+      names << name = File.basename(file, '.csv')
+
+      prefix = "#{name}:" if multiple
 
       CSV.foreach(file, opts) { |row|
         row.each_with_index { |(label, value), index|
@@ -92,6 +96,8 @@ module PlotCSV
             next if empty == false
             value = empty
           end
+
+          label.insert(0, prefix) if prefix
 
           if aggregate
             key = row.values_at(*aggregate) << label
