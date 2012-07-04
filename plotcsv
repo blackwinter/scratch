@@ -52,20 +52,21 @@ module PlotCSV
   USAGE = "Usage: #{$0} [options] <csv>..."
 
   DEFAULTS = {
-    :range      => nil,
     :aggregate  => nil,
-    :empty      => nil,
+    :comment    => nil,
     :delimiter  => ',',
-    :linear_fit => false,
-    :terminal   => 'png',
-    :style      => 'lines',
-    :width      => nil,
+    :empty      => nil,
     :height     => nil,
-    :min_x      => nil,
+    :linear_fit => false,
     :max_x      => nil,
-    :min_y      => nil,
     :max_y      => nil,
-    :comment    => nil
+    :mean       => false,
+    :min_x      => nil,
+    :min_y      => nil,
+    :range      => nil,
+    :style      => 'lines',
+    :terminal   => 'png',
+    :width      => nil
   }
 
   def run(argv = ARGV)
@@ -129,7 +130,9 @@ module PlotCSV
     x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
     y = options[:height] || data.values.flatten.max.between(512, 768)
 
-    title, style, fit = names.join(' / '), *options.values_at(:style, :linear_fit)
+    title, style, mean, fit = names.join(' / '), *options.values_at(
+      :style, :mean, :linear_fit
+    )
 
     opts = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
     title << '\n' << opts.tr('"', "'") unless opts.empty?
@@ -145,7 +148,11 @@ module PlotCSV
       data.sort.each { |label, values|
         plot.data(values) { |ds|
           ds.with, ds.title = style, label
-        } unless fit == :only
+        } unless mean == :only || fit == :only
+
+        plot.data(Array.new(values.size, values.mean)) { |ds|
+          ds.with, ds.title = 'lines', "#{label} (mean)"
+        } if mean
 
         plot.data(values.llsq.map { |_, i| i }) { |ds|
           ds.with, ds.title = 'lines', "#{label} (fit)"
@@ -249,6 +256,14 @@ module PlotCSV
       }
 
       opts.separator ''
+
+      opts.on('-n', '--mean', "Add arithmetic mean line (ignores '-s')") {
+        options[:mean] = true
+      }
+
+      opts.on('-N', '--mean-only', "Plot arithmetic mean only (implies '-n')") {
+        options[:mean] = :only
+      }
 
       opts.on('-l', '--linear-fit', "Add linear fit line (ignores '-s')") {
         options[:linear_fit] = true
