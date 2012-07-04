@@ -36,6 +36,7 @@ else
   require 'csv'
 end
 
+require 'nuggets/array/mean'
 require 'nuggets/array/regression'
 require 'nuggets/numeric/limit'
 
@@ -88,14 +89,19 @@ module PlotCSV
 
       prefix = "#{name}:" if multiple
 
-      CSV.foreach(file, opts) { |row|
+      rows = []
+
+      CSV.foreach(file, opts) { |row| rows << row }
+
+      rows.each_with_index { |row, rindex|
         row.each_with_index { |(label, value), index|
           next unless range.nil? || range.include?(index)
 
-          if value.nil?
-            next if empty == false
-            value = empty
-          end
+          case empty
+            when false then next
+            when Array then value = interpolate(rows, rindex, label, empty)
+            else            value = empty
+          end if value.nil?
 
           label.insert(0, prefix) if prefix
 
@@ -126,7 +132,7 @@ module PlotCSV
     title, style, fit = names.join(' / '), *options.values_at(:style, :linear_fit)
 
     opts = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
-    title << '\n' << opts.delete('"') unless opts.empty?
+    title << '\n' << opts.tr('"', "'") unless opts.empty?
 
     Gnuplot.plot { |plot|
       plot.terminal "#{options[:terminal]} size #{x}, #{y}"
@@ -203,6 +209,11 @@ module PlotCSV
         options[:empty] = i
       }
 
+      opts.on('-P', '--interpolate-empty [RANGE[:DEFAULT]]', /\A\d+(?::[\d.]+)?\z/, 'Interpolate empty fields') { |i|
+        r, d = i.split(':') if i
+        options[:empty] = [(r = r.to_i).zero? ? 1 : r, d.to_f]
+      }
+
       opts.separator ''
 
       opts.on('-d', '--delimiter STRING', "Field delimiter [Default: '#{options[:delimiter]}']") { |d|
@@ -263,11 +274,21 @@ module PlotCSV
   def column_ranges(string)
     string.split(',').map { |range|
       if range =~ %r{\A(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
-        $1.to_i.step(($2 || $1).to_i, ($3 || 1).to_i).to_a
+        $1.to_i.step(($2 || $1).to_i, ($3 || 1).to_i).to_a.uniq
       else
         abort "Illegal range: #{range} (#{string})"
       end
     }.flatten
+  end
+
+  def interpolate(rows, index, label, range)
+    ary, range, default = [], *range
+
+    1.upto(range) { |i| [-1, 1].each { |s|
+      ary << ((row = rows[index + (s * i)]) && row[label] || default)
+    } }
+
+    rows[index][label] = ary.mean
   end
 
 end
