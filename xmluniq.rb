@@ -178,8 +178,11 @@ module XmlUniq
 
     return if options[:dry_run]
 
-    # LibXSLT::XSLT::Stylesheet expects top-level constant XML (old libxml-ruby interface)
-    Object.const_set(:XML, LibXML::XML) unless Object.const_defined?(:XML) || have_libxslt_register?
+    unless Object.const_defined?(:XML) || have_libxslt_register?
+      # LibXSLT::XSLT::Stylesheet expects top-level
+      # constant XML (old libxml-ruby interface)
+      Object.const_set(:XML, LibXML::XML)
+    end
 
     xml = LibXSLT::XSLT::Stylesheet.new(
       LibXML::XML::Document.string(xslt)
@@ -197,7 +200,10 @@ module XmlUniq
     ]
 
     warn cmd.join(' ') if options[:print_cmd]
-    system(*cmd) or abort "Could not execute command: #{cmd.join(' ')}" unless options[:dry_run]
+
+    return if options[:dry_run]
+
+    system(*cmd) or abort "Could not execute command: #{cmd.join(' ')}"
   end
 
   def xslt_file(xslt)
