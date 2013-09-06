@@ -69,8 +69,10 @@ module PlotCSV
     :width      => nil
   }
 
-  def run(argv = ARGV)
-    plot(*read(argv, options = parse_options(argv)) << options)
+  def run(argv = ARGV, *plot_args)
+    options = parse_options(argv)
+    data, names = read(argv, options)
+    plot(data, names, options, *plot_args)
   end
 
   def read(files, options = {})
@@ -126,7 +128,7 @@ module PlotCSV
     [data, names]
   end
 
-  def plot(data, names, options = {})
+  def plot(data, names, options = {}, *plot_args)
     x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
     y = options[:height] || data.values.flatten.max.between(512, 768)
 
@@ -137,7 +139,7 @@ module PlotCSV
     opts = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
     title << '\n' << opts.tr('"', "'") unless opts.empty?
 
-    Gnuplot.plot { |plot|
+    Gnuplot.plot(*plot_args) { |plot|
       plot.terminal "#{options[:terminal]} size #{x}, #{y}"
 
       plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
