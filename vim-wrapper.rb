@@ -1,4 +1,4 @@
-#! /usr/bin/ruby
+#! /usr/bin/env ruby
 
 name = File.basename($0)
 cmd  = (%x{which -a #{name}}.split($/) - [$0]).first
