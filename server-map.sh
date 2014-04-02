@@ -35,7 +35,7 @@ if [ "$name" = "$real" ]; then
   for item in "${map[@]}"; do
     entry=(${item//:/ })
 
-    for prefix in "+" "-" "2" "cp2"; do
+    for prefix in "+" "-" "2" "4" "cp2"; do
       link="${prefix}${entry[0]}"
 
       if [ -e "$link" ]; then
@@ -53,7 +53,7 @@ if [ "$name" = "$real" ]; then
     done
   done
 else
-  base="${name/#@(+|-|2|cp2)/}"
+  base="${name/#@(+|-|2|4|cp2)/}"
 
   # connect to host
   for item in "${map[@]}"; do
@@ -88,6 +88,15 @@ else
     2* )
       warn "$user@$host"
       ssh -l "$user" "$host" "$@"
+      ;;
+    4* )
+      rport="$1"; shift
+      lport="${1:-$rport}"; shift
+
+      lhost="localhost"
+
+      warn "$user@$host:$rport -> $lhost:$lport"
+      ssh -l "$user" "$host" "$@" -fNL "$lhost:$lport:$lhost:$rport"
       ;;
     cp2* )
       [ -z "$1" ] && { scp --help; die; }
