@@ -1,0 +1,18 @@
+#! /bin/bash
+
+afs="${AEROFS:-$HOME/AeroFS}/"
+
+if [ $# -eq 0 ]; then
+  for dir in "$afs"{,*/}; do
+    echo -n "$(basename "$dir") "
+    find "$dir" -type f ! -name '.*' | wc -l | tr -d $'\n'
+    du -sh "$dir" | awk '{print " " $1}'
+  done | sort | column -t
+elif [ $# -eq 1 -a "${1:0:1}" == "-" ]; then
+  find "$afs" -type f -mtime "$1" | sort
+elif [ $# -eq 2 -a "${1:0:1}" == "@" ]; then
+  find "$afs${1:1}" -type f -iname "*.pdf" -exec pdfgrep \
+    -H "$2" {} 2> /dev/null + | awk -F: '{print $1}' | sort -u
+else
+  while [ -n "$1" ]; do find "$afs" -type f -iname "*$1*"; shift; done | sort -u
+fi
