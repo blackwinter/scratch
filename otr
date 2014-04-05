@@ -2,9 +2,9 @@
 
 ###############################################################################
 #                                                                             #
-# otr -- get/decode/play otr files / 7290106 - 7140310                        #
+# otr -- get/decode/play otr files / 7290106 - 3020414                        #
 #                                                                             #
-# Copyright (C) 2006-2011 Jens Wille <ww221E@gmail.com>                       #
+# Copyright (C) 2006-2014 Jens Wille <ww221E@gmail.com>                       #
 #                                                                             #
 # otr is free software: you can redistribute it and/or modify it under the    #
 # terms of the GNU Affero General Public License as published by the Free     #
@@ -31,7 +31,7 @@
 
 # author and version
  AUTHOR="Jens Wille <ww221E@gmail.com>"
-VERSION="0.8"
+VERSION="0.9"
 
 
 ################################################################################
@@ -137,7 +137,7 @@ report bugs to $AUTHOR;
 any feedback appreciated."
 
 VERSION_INFO="\
-Copyright (C) 2006-2011 $AUTHOR
+Copyright (C) 2006-2014 $AUTHOR
 
 This program is free software, and you are welcome to
 redistribute and/or modify it under the terms of the GNU
@@ -171,7 +171,7 @@ PLAY_HELP="
 
 # print message and exit
 function die() {
-  echo "$1"
+  echo "$1" >&2
 
   exit ${2:-1}
 }
@@ -219,35 +219,35 @@ shopt -s extglob
 
 # print usage (+ optional message) and exit
 function die_usage() {
-  [ -n "$1" ] && echo "$1"
-  echo "$USAGE"
-  echo "try '$NAME -h' for more information."
+  [ -n "$1" ] && echo "$1" >&2
+  echo "$USAGE" >&2
+  echo "try '$NAME -h' for more information." >&2
 
   exit 1
 }
 
 # print help and exit
 function exit_help() {
-  echo "$HELP"
+  echo "$HELP" >&2
 
   exit 0
 }
 
 # print version information and exit
 function exit_version() {
-  echo "$NAME $VERSION"
-  echo
-  echo "$VERSION_INFO"
+  echo "$NAME $VERSION" >&2
+  echo >&2
+  echo "$VERSION_INFO" >&2
 
   exit 0
 }
 
 # print welcome message
 function print_welcome() {
-  echo "$NAME: $DESCRIPTION (v$VERSION)"
-  echo
-  echo "$VERSION_INFO"
-  echo
+  echo "$NAME: $DESCRIPTION (v$VERSION)" >&2
+  echo >&2
+  echo "$VERSION_INFO" >&2
+  echo >&2
 
   return 0
 }
@@ -314,9 +314,10 @@ function _mv() {
 function _re() {
   while [ -n "$1" ]; do
     file="$1"; shift
+    name="$($BASENAM "$file")"
 
-    read -e -p "new name for '$($BASENAM "$file")': "
-    rename="$($DIRNAME "$file")/$($BASENAM "$REPLY")"
+    read -e -i "$name" -p "new name for '$name': "
+    rename="$($DIRNAME "$file")/$($BASENAM "${REPLY// /_}")"
 
     if [ -n "$REPLY" ] && [ "$rename" != "$file" ]; then
       if [ -e "$rename" ]; then
@@ -366,7 +367,7 @@ function _vplay() {
 function _info() {
   file="$1"
 
-  title=$($BASENAM "$file" | $SED -e 's/^\(.*\)_[0-9][0-9].[0-9][0-9].[0-9][0-9]_[0-9][0-9]-[0-9][0-9]_.*/\1/; s/_\+/%20/g')
+  title=$($BASENAM "$file" | $SED 's/^\(.*\)_[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]_[0-9][0-9]-[0-9][0-9]_.*/\1/; s/_\+/%20/g')
 
   $BROWSER "${QUERY}${title/%@(BEGIN|END)}" &
 
@@ -375,7 +376,7 @@ function _info() {
 
 # decoder
 function _decode() {
-  key="$1"
+  key="$1"; force=""
   [ "$2" = "f" ] && force="-q"
 
   [ "$MAIL" == "-" ] && read -e    -p "enter e-mail address: " MAIL
@@ -407,7 +408,7 @@ function _du {
 
 # free space
 function _df() {
-  $DF -${2:-h} "$1" | $TAIL -1 | $SED -e 's/^[^ ]\+ \+[^ ]\+ \+[^ ]\+ \+\([^ ]\+\).*$/\1/'
+  $DF -${2:-h} "$1" | $TAIL -1 | $SED 's/^[^ ]\+ \+[^ ]\+ \+[^ ]\+ \+\([^ ]\+\).*$/\1/'
 
   return 0
 }
@@ -437,7 +438,7 @@ function _select {
     c="$($DIRNAME "$1")"
     if [ "$c" != "$p" ]; then
       p="$c"
-      c="$(echo "${c#$OTRVIDS}" | $SED -e 's/_/ /g; s/^\/\([0-9]\+\) */\1. /')"
+      c="$(echo "${c#$OTRVIDS}" | $SED 's/_/ /g; s/^\/\([0-9]\+\) */\1. /')"
       echo "---- ${c:-NONE} ----"
     fi
 
@@ -448,7 +449,7 @@ function _select {
     #   3 = length
     #   4 = channel
     #   5 = size
-    eval x=($($BASENAM "$1" | $SED -e 's/^\(.*\)_\([0-9][0-9]\).\([0-9][0-9]\).\([0-9][0-9]\)_\([0-9][0-9]\)-\([0-9][0-9]\)_\(.*\)_\([0-9]\+\)_.*$/"\1" "\4.\3.\2" "\5:\6" "\8" "\7"/; s/_\+/ /g') "$(_du "$1")")
+    eval x=($($BASENAM "$1" | $SED 's/^\(.*\)_\([0-9][0-9]\)\.\([0-9][0-9]\)\.\([0-9][0-9]\)_\([0-9][0-9]\)-\([0-9][0-9]\)_\(.*\)_\([0-9]\+\)_.*$/"\1" "\4.\3.\2" "\5:\6" "\8" "\7"/; s/_\+/ /g') "$(_du "$1")")
 
     # colors:
     #  normal       = white (1;37)
@@ -478,6 +479,9 @@ function _select {
       # partially seen:
       #   title, date = light magenta (1;35)
       hl0="\033[1;35m"
+      hl1="$hl1"
+    else
+      hl0="\033[1;32m"
       hl1="$hl1"
     fi
 
@@ -607,14 +611,13 @@ function _select_category() {
       cat[$i]="$d"
       i=$(($i + 1))
 
-      list="$list\n$(printf "%3d) %s" "$i" "$($BASENAM "$d" | $SED -e 's/^[0-9]\+_*//')")"
+      list="$list\n$(printf "%3d) %s" "$i" "$($BASENAM "$d" | $SED 's/^[0-9]\+_*//')")"
     done
 
     [ $i -eq 0 ] && echo && return 0
 
     nam="$($BASENAM "$vid")"; REPLY=""
 
-    [ -z "$REPLY" ] && for pat in "${SELECT_NONE[@]}";  do case "$nam" in $pat* ) REPLY=0; break;; esac; done
     [ -z "$REPLY" ] && for pat in "${SELECT_ONE[@]}";   do case "$nam" in $pat* ) REPLY=1; break;; esac; done
     [ -z "$REPLY" ] && for pat in "${SELECT_TWO[@]}";   do case "$nam" in $pat* ) REPLY=2; break;; esac; done
     [ -z "$REPLY" ] && for pat in "${SELECT_THREE[@]}"; do case "$nam" in $pat* ) REPLY=3; break;; esac; done
@@ -623,21 +626,13 @@ function _select_category() {
     [ -z "$REPLY" ] && for pat in "${SELECT_SIX[@]}";   do case "$nam" in $pat* ) REPLY=6; break;; esac; done
 
     if [ -n "$REPLY" ]; then
-      if [ "$REPLY" -eq 0 ]; then
-        echo "sorting '$nam' into category: NONE"
-        echo
-        return 0
-      else
-        echo "sorting '$nam' into category: ${cat[$(($REPLY - 1))]}"
-      fi
-    else  # ask
+      echo "sorting '$nam' into category: ${cat[$(($REPLY - 1))]}"
+    else
       echo -e "${list:2}"
-      read -e -p "which category to sort '$nam' into? (1-$i) [NONE]: "
+      read -e -p "which category to sort '$nam' into? (1-$i): "
       [ $? -ne 0 ] && REPLY=""
 
       case "$REPLY" in
-        "" )       echo;
-                   return 0;;
         +([0-9]) ) true;;
         * )        echo "> illegal input: $REPLY";
                    echo;
@@ -682,7 +677,7 @@ function otr_play() {
   fi
 
   # update access time
-  $TOUCH -a "$vid"
+  $TOUCH -ac "$vid"
 
   read -e -p "keep '$vid'? (y/n/r/m/p/a/v) [y]: "
   case "$REPLY" in
@@ -723,8 +718,9 @@ function otr_decode() {
       hl0="\033[1;33m"
     fi
 
-    printf "decode '$key' [%b%s%b]? (y/n/f) [y]: " "$hl0" "$sz" "$rst"
+    printf "decode '$key' [%b%s%b]? (y/n/f/q) [y]: " "$hl0" "$sz" "$rst"
     read -e
+    [ "$REPLY" == "q" ] && exit
     [ "$REPLY" == "n" ] && return 0
 
     # do not decode if free space under-runs file size (plus BONUS)
@@ -732,19 +728,13 @@ function otr_decode() {
 
     _decode "$key" "$REPLY"
 
-    if [[ "$vid" =~ "_Top_Tipp_" ]]; then
-      old="$vid"
-      vid="${vid/_Top_Tipp_}"
-
-      mv "$old" "$vid"
-    fi
-
     if [ -s "$vid" ]; then
-      read -e -p "play '$vid'? (y/n/a) [y]: "
+      read -e -p "play '$vid'? (y/n/a/v) [v]: "
       case "$REPLY" in
         n ) echo;;
-        a ) otr_play "$vid" "1";;
-        * ) otr_play "$vid";;
+        y ) otr_play "$vid";;
+        a ) otr_play "$vid" "alt";;
+        * ) otr_play "$vid" "vlc";;
       esac
 
       [ -e "$vid" ] && _select_category "$vid"
@@ -797,6 +787,10 @@ function _grep_vids() {
   $EGREP -i "$1[^/]+" $ARCHLST | $PERL -pe 's{.*?-(.*?)\..*?:}{($1=="'"$(get_uuid "$ARCHIVE")"'"?"\033[0;33m":"\033[0;37m").$1.": "}e; s{$}{\033[0m}'
 }
 
+function channels() {
+  find_vids "" | $SED 's/.*_[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]_[0-9][0-9]-[0-9][0-9]_\([^_]*\)_[0-9][0-9]*_.*/\1/'
+}
+
 function mount_archive() {
   [ -d "$ARCHIVE" ] || die "directory does not exist: $ARCHIVE"
 
@@ -847,7 +841,7 @@ function archive() {
 }
 
 function archlst() {
-  echo "$ARCHLST" | sed "s/\*/$(get_uuid "$ARCHIVE")/"
+  echo "$ARCHLST" | $SED "s/\*/$(get_uuid "$ARCHIVE")/"
 }
 
 function mkarchlst() {
@@ -916,13 +910,13 @@ case "$1" in
   -D|--duplicates )
                  print_welcome
 
-                 find_vids ""                                                                     |\
-                   $GREP -v "${DUPE_EXCL:-XXXYYYZZZ}"                                             |\
-                   $SED 's:.*/\(.*\)\(_([0-9]-[0-9])\)\?_[0-9][0-9].[0-9][0-9].[0-9][0-9]_.*:\1:' |\
-                   $SED 's:_([0-9]-[0-9])$::'                                                     |\
-                   $TR  '[:upper:]' '[:lower:]'                                                   |\
-                   $SORT                                                                          |\
-                   $UNIQ -d                                                                       |\
+                 find_vids ""                                                                       |\
+                   $GREP -v "${DUPE_EXCL:-XXXYYYZZZ}"                                               |\
+                   $SED 's:.*/\(.*\)\(_([0-9]-[0-9])\)\?_[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]_.*:\1:' |\
+                   $SED 's:_([0-9]-[0-9])$::'                                                       |\
+                   $TR  '[:upper:]' '[:lower:]'                                                     |\
+                   $SORT                                                                            |\
+                   $UNIQ -d                                                                         |\
                    while read d; do
                      find_vids "$d"
                    done
@@ -959,6 +953,16 @@ case "$1" in
 
                  mkarchlst
                  $CAT $ARCHLST
+                 ;;
+  -c|--channels )
+                 print_welcome
+
+                 channels | sort -u
+                 ;;
+  -C|--channel-counts )
+                 print_welcome
+
+                 channels | $SORT | $UNIQ -c | $SORT -rn
                  ;;
   -z           ) get_uuid "$ARCHIVE";;
   -*           ) die_usage "unrecognized option: $1";;
