@@ -1,0 +1,21 @@
+#! /bin/bash
+
+function meminfo() {
+  map="/proc/$1/smaps"
+
+  [ -r "$map" ] && awk '
+    /^Size:/          { s += $2 };
+    /^Rss:/           { r += $2 };
+    /^Private_Dirty:/ { p += $2 };
+    /^Swap:/          { w += $2 };
+    END { print "'"$1"':", s / 1024, r / 1024, p / 1024, w / 1024 }
+  ' "$map"
+}
+
+if [ $# -eq 0 ]; then
+  meminfo self
+else
+  while [ -n "$1" ]; do
+    meminfo "$1"; shift
+  done
+fi

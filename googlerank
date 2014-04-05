@@ -1,0 +1,55 @@
+#! /usr/bin/ruby
+
+require 'rubygems'
+require 'open-uri'
+require 'hpricot'
+
+GOOGLE = %q{http://google.%s/search?num=100&pws=0&gl=%s&q=}
+DOMAIN = [['com', 'US'], 'de', 'fr']
+
+FORMAT = %q{%2d %s}
+
+csvout = ARGV.delete('--csv')     || ARGV.delete('-c')
+silent = ARGV.delete('--quiet')   || ARGV.delete('-q')
+verbos = ARGV.delete('--verbose') || ARGV.delete('-v')
+target = ARGV.shift
+
+abort "Usage: #{$0} <target> <query>..." if ARGV.empty?
+
+re = %r{://(?:\w+\.)*#{Regexp.escape(target)}/}
+
+DOMAIN.each { |domain, country|
+  google = GOOGLE % [domain, country || domain.upcase]
+
+  ARGV.each { |query|
+    url = google + URI.escape(query)
+    warn "<#{url}>" unless silent
+
+    results = (Hpricot(open(url))/'h3.r a.l').map { |e| e['href'] }
+    matches = results.grep(re)
+
+    warn '' if verbos && !silent
+
+    matches.each { |hit|
+      warn FORMAT % [results.index(hit) + 1, hit] unless silent
+    }
+
+    if csvout
+      rank = results.index(matches.first)
+      rank += 1 if rank
+
+      puts [Time.now.strftime('%Y%m%d'), domain, query, rank].join(',')
+    end
+
+    if verbos && !silent
+      warn 'NOT FOUND' if matches.empty?
+      warn ''
+
+      results[0, 10].each_with_index { |hit, index|
+        warn FORMAT % [index + 1, hit]
+      }
+    end
+
+    warn '' unless silent
+  }
+}

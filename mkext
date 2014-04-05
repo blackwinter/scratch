@@ -1,0 +1,38 @@
+#! /bin/bash
+
+multiruby="$HOME/.multiruby/install"
+
+if [ -n "$1" ]; then
+  case "$1" in
+    rbx )
+      v="rbx_trunk";;
+    20 )
+      v="mri_trunk";;
+    [0-9][0-9]* )
+      v="mri_$(echo "$1" | sed 's/[0-9]/&_/g; s/_\b//')";;
+    v[0-9][0-9][0-9]_* )
+      v="$(echo "$1" | sed 's/\([0-9]\)\([0-9]\)\([0-9]\)/\1_\2_\3/')";;
+    v* )
+      v="$(echo "$1" | sed 's/[0-9]/&_/g; s/_\b//')";;
+    * )
+      v="mri_$1";;
+  esac
+
+  ruby="$multiruby/$v/bin/ruby"
+  [ -x "$ruby" ] || { echo "ruby version not found: $v" 2>&1; exit 1; }
+else
+  ruby="ruby"
+fi
+
+ext="extconf.rb"
+dir="."
+
+if [ ! -f "$ext" ] && [ -d "ext" ]; then
+  dir="$(find "ext" -type f -name "$ext" -printf "%h" -quit)"
+fi
+
+[ -n "$dir" ] && { echo "using $dir for $ext..." 2>&1; cd "$dir"; }
+[ -f "$ext" ] || { echo "file not found: $ext" 2>&1; exit 1; }
+
+[ -f "Makefile" ] && make clean
+WALL=1 $ruby -v "$ext" && make
