@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# 2ogg: convert any audio file to ogg using 'mplayer' / 2211205 - 7020406
+# 2ogg: convert any audio file to ogg using 'mplayer' / 2211205 - 3020113
 # (based on: <http://ubuntu.wordpress.com/2005/09/29/wma-to-ogg-file-conversion/>)
 
 # TODO:
@@ -8,7 +8,7 @@
 # - skip vs. overwrite existing
 # - streams (alternative for realstreams: vsound -t -f WAV trplayer STREAM)
 
-LOG="2ogg_$(date +%Y%m%d-%H%M%S).log"
+LOG="/dev/null"
 JUK="juk"
 EXF="exiftool -s -s -s"
 MPD="audiodump.wav"  # dump file produced by mplayer
@@ -30,15 +30,15 @@ options:
     -h       [help]                 display this help and exit
     -v       [verbose]              be verbose (regards mplayer output)
     -q       [quiet]                be quiet (minimal output)
-    -n       [no logfile]           don't write a logfile
+    -l       [logfile]              write a logfile
     -c       [current dir]          create ogg's in current directory (instead of original)
     -d       [decode only]          only decode source files (no ogg's will be created)
     -k       [keep wav]             keep wav files
     -m DIR   [move to DIR]          move source files to DIR afterwards
     -r       [remove]               remove source files afterwards (asks interactively)
     -R       [remove -- don't ask]  just like '-r', but *don't* prompt before removal! (i'd be careful with that ;-)
-    -t       [transform]            transform/normalize file name
-    -j       [juk]                  run 'juk' afterwards (to add metadata to ogg's)
+    -t       [no transform]         don't transform/normalize file name
+    -j       [no juk]               don't run 'juk' afterwards (to add metadata to ogg's)
 "
 
 # exit immediately if a simple command exits with a non-zero status.
@@ -48,12 +48,12 @@ set -e
 shopt -s extglob
 
 V=""; Q=""; C=""; D=""; K=""; M=""; R=""; I=""; T=""; J=""
-while getopts hvqncdkm:rRtj opt; do
+while getopts hvqlcdkm:rRtj opt; do
   case "$opt" in
     h ) echo "$HELP"; exit 0;;
     v ) V="1";;
     q ) Q="1";;
-    n ) LOG="/dev/null";;
+    l ) LOG="2ogg_$(date +%Y%m%d-%H%M%S).log";;
     c ) C="1";;
     d ) D="1";;
     k ) K="1";;
@@ -84,7 +84,7 @@ if [ -n "$M" ]; then
   fi
 fi
 
-[ -n "$D" ] && J=""
+[ -n "$D" ] && J="1"
 
 TS="$($TIM)"
 
@@ -95,7 +95,17 @@ _do_action() {
   ANY="$file"
   DIR="$(dirname  "$ANY")"
   BAS="$(basename "$ANY" | sed -e 's/\.[^.]\+$//')"
-  [ -n "$T" ] && BAS="$(echo "$BAS" | tr -d [!?´\`/:] | tr [:upper:] [:lower:] | sed -e 's/ \+/_/g' | sed -e "s/'\{2,\}//g")"
+
+  [ -z "$T" ] && BAS="$(echo "$BAS"   |\
+    tr -d [!?´\`/:]                   |\
+    tr [:upper:] [:lower:]            |\
+    sed -e 's/ \+/_/g'                |\
+    sed -e 's/^\([0-9]\+\)_-_/\1_/'   |\
+    sed -e 's/_*\[explicit\]\././'    |\
+    sed -e 's/_*(album_version)\././' |\
+    sed -e "s/'\{2,\}//g"
+  )"
+
   if [ -n "$C" ]; then
     OGG="${BAS}.ogg"
     WAV="${BAS}.wav"
@@ -106,7 +116,7 @@ _do_action() {
 
   k=0
   while [ -e "$OGG" ]; do
-    k=$(($k + 1))
+    ((k++))
     OGG="${OGG/?(-+([0-9])).ogg/-$k.ogg}"
   done
 
@@ -158,10 +168,11 @@ _do_action() {
   if $EXF "$ANY" &> /dev/null; then
     # from exiftool
     MA="$($EXF -Artist "$ANY")"
-    ML="$($EXF -Album  "$ANY")"
-    MT="$($EXF -Title  "$ANY")"
+    ML="$($EXF -Album  "$ANY" | sed -e 's/ *\[explicit\]//i')"
+    MT="$($EXF -Title  "$ANY" | sed -e 's/ *\[explicit\]//i')"
     MG="$($EXF -Genre  "$ANY")"
     MY="$($EXF -Year   "$ANY")"
+    MN="$($EXF -Track  "$ANY" | cut -d/ -f1)"
   else
     # guess from filename
     eval NAME=($(echo "$(echo "$ANY" | sed 's/[()]/\\&/g')" | tr _ " " | sed 's/\b\(.\)/\u\1/g; s/\('"'"'\)\(.\)/\1\l\2/g; s/^\(.*\) - \(.*\)\.[^.]\+$/"\1" "\2"/'))
@@ -170,10 +181,11 @@ _do_action() {
     MT="${NAME[1]}"
     MG=""
     MY=""
+    MN=""
   fi
 
   # encode to ogg
-  $OGE $RAW -a "$MA" -l "$ML" -t "$MT" -G "$MG" -d "$MY" -o "$OGG" "$WAV" &> $ERE
+  $OGE $RAW -a "$MA" -l "$ML" -t "$MT" -G "$MG" -d "$MY" -N "$MN" -o "$OGG" "$WAV" &> $ERE
 
   if [ -e "$OGG" ]; then
     echo "SUCC $ANY" >> $LOG
@@ -215,6 +227,6 @@ fi
 TE="$($TIM)"; touch $LOG
 echo "[$(perl -e "$HMS" $(($TE - $TS)))] finished -- $j ERRORS (logfile was '$LOG')"
 
-[ -n "$J" ] && $JUK "${OGS[@]}" &
+[ -z "$J" ] && $JUK "${OGS[@]}" &
 
 exit 0
