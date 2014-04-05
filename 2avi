@@ -1,6 +1,6 @@
 #! /bin/bash
 
-ENC="mencoder -ovc lavc -oac copy -o"
+ENC="mencoder -ovc lavc -lavcopts mbd=2:trell=yes:v4mv=yes:autoaspect=1 -oac copy -o"
 
 while [ -n "$1" ]; do
   f="$1"; shift
