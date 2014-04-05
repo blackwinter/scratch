@@ -96,7 +96,20 @@ module PlotCSV
 
       rows = []
 
-      CSV.foreach(file, opts) { |row| rows << row }
+      if file == '-'
+        begin
+          csv = CSV.new($stdin, opts)
+          csv.each { |row| rows << row }
+        ensure
+          csv.close if csv
+        end
+      else
+        CSV.foreach(file, opts) { |row| rows << row }
+      end
+
+      unless range.nil? || rows.empty? || !range.delete(:exclude)
+        range.replace((0...rows.first.headers.size).to_a - range)
+      end
 
       rows.each_with_index { |row, rindex|
         row.each_with_index { |(label, value), index|
@@ -131,6 +144,8 @@ module PlotCSV
   end
 
   def plot(data, names, options = {}, *plot_args)
+    return if data.empty?
+
     x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
     y = options[:height] || data.values.flatten.max.between(512, 768)
 
@@ -173,13 +188,11 @@ module PlotCSV
 
   def parse_options(arguments, options = DEFAULTS)
     option_parser(options).parse!(arguments)
-
-    abort USAGE if arguments.empty?
-
+    arguments << '-'  if arguments.empty?
     options
   end
 
-  def option_parser(options)
+  def option_parser(options = {})
     OptionParser.new { |opts|
       opts.banner = USAGE
 
@@ -299,13 +312,23 @@ module PlotCSV
   end
 
   def column_ranges(string)
-    string.split(',').map { |range|
-      if range =~ %r{\A(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
-        $1.to_i.step(($2 || $1).to_i, ($3 || 1).to_i).to_a.uniq
+    a, b = [], []
+
+    string.split(',').each { |range|
+      if range =~ %r{\A(\^)?(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
+        ($1 ? b : a).concat($2.to_i.step(
+          ($3 || $2).to_i, ($4 || 1).to_i).to_a)
       else
         abort "Illegal range: #{range} (#{string})"
       end
-    }.flatten
+    }
+
+    if a.empty? && !b.empty?
+      b << :exclude
+    else
+      a -= b
+      a unless a.empty?
+    end
   end
 
   def interpolate(rows, index, label, range)
