@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# 2ogg: convert any audio file to ogg using 'mplayer' / 2211205 - 3020113
+# 2ogg: convert any audio file to ogg using 'mplayer' / 2211205 - 4100414
 # (based on: <http://ubuntu.wordpress.com/2005/09/29/wma-to-ogg-file-conversion/>)
 
 # TODO:
@@ -227,6 +227,9 @@ fi
 TE="$($TIM)"; touch $LOG
 echo "[$(perl -e "$HMS" $(($TE - $TS)))] finished -- $j ERRORS (logfile was '$LOG')"
 
-[ -z "$J" ] && $JUK "${OGS[@]}" &
+if [ -z "$J" ]; then
+  read -ep 'JuK...'
+  $JUK "${OGS[@]}" &
+fi
 
 exit 0
