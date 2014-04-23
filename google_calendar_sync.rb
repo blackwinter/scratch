@@ -31,15 +31,12 @@
 require 'nuggets/env/user_home'
 require 'google/api_client'
 require 'icalendar'
-require 'tzinfo'
 require 'json'
 require 'time'
 
-Icalendar::Component.class_variable_get(:@@multiline_properties)['exdate'] = true
-
 class GoogleCalendarSync
 
-  VERSION = '0.1'
+  VERSION = '0.2'
 
   DEFAULT_CFG = File.join(ENV.user_home, '.google_calendar_sync.json')
 
