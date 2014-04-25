@@ -356,7 +356,7 @@ class GoogleCalendarSync
     end
 
     def diff?(event)
-      (hash = event.to_h).values != values_at(*hash.keys)
+      (hash = event.to_h).values != to_hash.values_at(*hash.keys)
     end
 
   end
