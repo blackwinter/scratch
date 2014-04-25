@@ -331,7 +331,7 @@ class GoogleCalendarSync
     t = event.class.default_property_types['rrule']
 
     event.batch(batch,
-      'recurrence' => event.rrule.map { |rrule| "RRULE:#{rrule.to_ical(t)}" },
+      'recurrence' => event.rrule.map { |rrule| "RRULE#{rrule.to_ical(t)}" },
       'extendedProperties' => { 'private' => { 'gcs:uid' => event.gcs_id } })
   end
 
