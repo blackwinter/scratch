@@ -1,0 +1,24 @@
+#! /bin/bash
+
+conf="/etc/lsyncd/lsyncd.conf.lua"
+[ -r "$conf" ] || exit 1
+
+key="source"
+grep -q "[\"@]$HOSTNAME\"" "$conf" && key="targetdir"
+
+dirs=( $(awk -F\" "/ $key =/{print \$2}" "$conf") )
+
+if [ $# -eq 0 ]; then
+  for dir in "${dirs[@]}"; do
+    echo -n "$(basename "$dir") "
+    find "$dir" -type f ! -name '.*' | wc -l | tr -d $'\n'
+    du -sh "$dir" | awk '{print " " $1}'
+  done | sort | column -t
+elif [ $# -eq 1 -a "${1:0:1}" == "-" ]; then
+  find "${dirs[@]}" -type f -mtime "$1" | sort
+else
+  while [ -n "$1" ]; do
+    find "${dirs[@]}" -type f -iname "*$1*"
+    shift
+  done | sort -u
+fi
