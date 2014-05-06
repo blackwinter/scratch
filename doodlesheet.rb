@@ -157,7 +157,7 @@ class Doodle
     report_internal(true) { |state, *args|
       case state
         when :begin           then puts "<h2>#{h[*args]}</h2>"
-        when :added, :deleted then puts "<h3>#{state.capitalize}</h3>\n#{h[*args]}"
+        when :added, :deleted then puts "<h3>#{state.capitalize}</h3>\n<p>#{h[*args]}</p>"
         when :changed
           case args.shift
             when :begin then puts "<h3>Changed</h3>\n<ul>"
