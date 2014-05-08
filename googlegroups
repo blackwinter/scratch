@@ -1,0 +1,20 @@
+#! /bin/bash
+
+[ $# -ne 2 ] && echo "Usage: $0 {sub|unsub} <group>" && exit 1
+
+a="lists@blackwinter.de"
+h="googlegroups.com"
+
+function cmd() {
+  mail -s "$2" -a "From: $a" "$1@$h" <<<""
+}
+
+case "$1" in
+  sub* )
+    cmd "$2+subscribe"
+    read -ep 'Request code: '
+    cmd "$2+subconfirm" "[{$REPLY}]"
+    ;;
+  unsub* )
+    cmd "googlegroups-manage+$2+unsubscribe"
+esac
