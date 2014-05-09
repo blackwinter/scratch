@@ -405,10 +405,21 @@ class GoogleCalendarSync
 
     def flush(size = 1)
       unless @batch.calls.size < size
-        @execute[@batch]
-        @batch.calls.clear
+        execute
         sleep 1
       end
+    end
+
+    def execute(retries = 5)
+      @execute[@batch]
+      @batch.calls.clear
+    rescue Timeout::Error
+      raise if retries.zero?
+
+      sleep 120 / retries
+      retries -= 1
+
+      retry
     end
 
   end
