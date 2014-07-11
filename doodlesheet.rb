@@ -12,7 +12,7 @@ class Doodle
 
   ADMIN_URL  = "#{POLL_URL}%s/admin"
 
-  EXPORT_URL = "#{BASE_URL}/export/excel?pollId=%s&adminKey=%s"
+  EXPORT_URL = "#{BASE_URL}/np/export/excel?pollId=%s&adminKey=%s"
 
   BASE_PATH  = File.expand_path('..', __FILE__)
 
