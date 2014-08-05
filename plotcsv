@@ -117,7 +117,7 @@ module PlotCSV
 
           case empty
             when false then next
-            when Array then value = interpolate(rows, rindex, label, empty)
+            when Array then value = interpolate(rows, rindex, label, *empty)
             else            value = empty
           end if value.nil?
 
@@ -331,8 +331,8 @@ module PlotCSV
     end
   end
 
-  def interpolate(rows, index, label, range)
-    ary, range, default = [], *range
+  def interpolate(rows, index, label, range, default)
+    ary = []
 
     1.upto(range) { |i| [-1, 1].each { |s|
       ary << ((row = rows[index + (s * i)]) && row[label] || default)
