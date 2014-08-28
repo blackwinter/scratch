@@ -98,8 +98,8 @@ class Doodle
     sheet(xls1).diff(sheet(xls2))
   end
 
-  def next
-    @next ||= sheet.next
+  def next_event
+    @next_event ||= sheet.next_event
   end
 
   def report_diff
@@ -133,7 +133,7 @@ class Doodle
       %Q{<span style="color: %s">%s</span>} % [COLOUR[value], h[value]]
     }
 
-    next_key, next_entries = self.next
+    next_key, next_entries = next_event
 
     unless next_entries.all?(&:empty?)
       puts %Q{<h2><a href="%s" class="plain">%s</a> [<a href="%s">%s</a>]</h2>\n<dl>} % [
@@ -237,7 +237,7 @@ class Doodle
         } }
     end
 
-    def next(date = Date.today)
+    def next_event(date = Date.today)
       [key = next_key(date), Hash.new { |h, k| h[k] = [] }.tap { |hash|
         each { |name, entries| hash[entries[key]] << name }
       }]
