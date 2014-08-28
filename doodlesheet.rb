@@ -211,14 +211,14 @@ class Doodle
   class Sheet < Hash
 
     def initialize(xls)
-      delete = true
+      keys, month, delete = [], nil, true
 
       sheet = Spreadsheet.open(xls, 'r').worksheets.first.to_a.delete_if { |row|
-        if row.empty?; delete = !delete; true; else; delete; end
+        row.empty? ? (delete = !delete; true) : delete ||
+          (row.first ? false : keys.unshift(row.drop(1)))
       }
 
-      keys = sheet.slice!(0, 3)  # months, days, events
-      keys.each(&:shift).reverse!; month = nil
+      keys.unshift(Array.new(keys.first.size, '?')) unless keys.size == 3
 
       keys = keys.shift.zip(*keys).each { |key| month = key[2] ||= month }
       sheet.each { |name, *entries| self[name] = Hash[keys.zip(entries)] }
