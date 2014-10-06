@@ -228,8 +228,8 @@ TE="$($TIM)"; touch $LOG
 echo "[$(perl -e "$HMS" $(($TE - $TS)))] finished -- $j ERRORS (logfile was '$LOG')"
 
 if [ -z "$J" ]; then
-  read -ep 'JuK...'
-  $JUK "${OGS[@]}" &
+  read -ep 'JuK... '
+  $JUK "${OGS[@]}" &> /dev/null &
 fi
 
 exit 0
