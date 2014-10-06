@@ -134,13 +134,18 @@ Usage: #{$0} [-k <key-file>] [-c <country>] [-d <date:YYYY-MM-DD>] <artist>...
     block = lambda { |names| choose(*names) }
   end
 
+  past = Date.today if ARGV.switch!(:p, :past)
+
   date = handle_option(:d, :date) { |d| Date.strptime(d, '%Y-%m-%d') }
 
   country = handle_option(:c, :country) || ENV['SEVENDIGITAL_COUNTRY']
 
   ARGV.each { |name| handle_error {
     SevendigitalReleases.new(name, key, country, &block).each { |release|
-      puts release.url unless date && release.release_date < date
+      next if past && release.release_date > past
+      next if date && release.release_date < date
+
+      puts release.url
     }
 
     sleep 1
