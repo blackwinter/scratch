@@ -1,11 +1,8 @@
 #! /usr/bin/ruby
 
-$KCODE = 'u'
+require 'csv'
 
-require 'rubygems'
-require 'fastercsv'
-
-abort "usage: #{$0} <csv> ..." if ARGV.empty?
+abort "Usage: #{$0} <csv>..." if ARGV.empty?
 
 # <http://www.w3.org/TR/2006/REC-xml-20060816/#NT-Name>
 ELEMENT_START = %r{^[a-zA-Z_:]}
@@ -18,7 +15,7 @@ ARGV.each { |f|
   puts "<!-- #{f} -->"
   puts
 
-  FasterCSV.foreach(f, :headers => true) { |row|
+  CSV.foreach(f, headers: true) { |row|
     puts '<row>'
 
     row.each { |field, value|
