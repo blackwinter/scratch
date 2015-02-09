@@ -56,6 +56,7 @@ module PlotCSV
     mean:       false,
     min_x:      nil,
     min_y:      nil,
+    notitle:    nil,
     range:      nil,
     skip_lines: nil,
     style:      'lines',
@@ -155,7 +156,7 @@ module PlotCSV
       plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
       plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
 
-      plot.title title
+      plot.title title unless options[:notitle]
 
       post_plot = yield data, plot if block_given?
 
@@ -201,6 +202,10 @@ module PlotCSV
       }
 
       opts.separator ''
+
+      opts.on('-T', '--notitle', "Don't add title to plot") {
+        options[:notitle] = true
+      }
 
       opts.on('-C', '--comment COMMENT', 'Comment to add onto plot') { |c|
         options[:comment] = c
