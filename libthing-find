@@ -1,0 +1,20 @@
+#! /usr/bin/env ruby
+
+require 'open-uri'
+require 'nokogiri'
+
+user  = ENV['LIBRARYTHING_USER'] or abort "#{$0}: LIBRARYTHING_USER required!"
+
+query = ARGV.map { |i| "titleandauthor:#{i}" }.join(' OR ')
+abort "Usage: #{$0} QUERY..." if query.empty?
+
+base  = 'https://www.librarything.com/catalog_bottom.php?view=%s&collection=-1&deepsearch=%s'
+
+uri   = base % [user, query].map(&URI.method(:encode_www_form_component))
+
+keys  = %w[a.lt-author a.lt-title span.lt-date]
+
+Nokogiri.HTML(open(uri), uri, 'UTF-8').search('tr.cat_catrow').each { |i|
+  a, t, d = keys.map { |k| i.at_css(k).inner_text }
+  puts '%s%s%s (%s)' % [a, a && ': ', t, d]
+}
