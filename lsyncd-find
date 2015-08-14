@@ -6,7 +6,7 @@ conf="/etc/lsyncd/lsyncd.conf.lua"
 key="source"
 grep -q "[\"@]$HOSTNAME\"" "$conf" && key="targetdir"
 
-dirs=( $(awk -F\" "/ $key =/{print \$2}" "$conf") )
+dirs=( $(awk -F\" "/ $key +=/{print \$2}" "$conf") )
 
 if [ $# -eq 0 ]; then
   for dir in "${dirs[@]}"; do
