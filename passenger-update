@@ -1,27 +1,13 @@
 #! /bin/bash
 
-PASSENGER_CONF="/etc/apache2/conf.d/passenger"
-[ ! -r "$PASSENGER_CONF" ] && echo "File not found: $PASSENGER_CONF" && exit 1
+set -e
 
-[ "`id -u`" -ne 0 ] && sudo="sudo"
+c="/etc/apache2/conf-available/local-passenger.conf"
+l="ruby"
 
-function step() {
-  read -ep "$1? (y/n) [y]: "
-  [ "$REPLY" = "n" ] && exit
-}
+sudo gem update passenger
 
-step "Update Passenger"
-$sudo gem update passenger
+passenger-install-apache2-module --snippet | sudo tee "$c"
+sudo passenger-install-apache2-module --auto --languages "$l"
 
-version="$(gem specification passenger version | awk '/^ *version:/{print $2}')"
-dirname="$(readlink -f "$(awk '/^PassengerRoot/{print $2}' "$PASSENGER_CONF")")"
-
-if [ "$(basename "$dirname")" != "passenger-$version" ]; then
-  echo "PassengerRoot not up-to-date: $dirname (expected $version)" && exit 1
-fi
-
-step "Install Apache 2 module"
-$sudo passenger-install-apache2-module
-
-step "Restart Apache"
-$sudo invoke-rc.d apache2 restart
+sudo systemctl restart apache2
