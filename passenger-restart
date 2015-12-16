@@ -1,0 +1,46 @@
+#! /bin/bash
+
+WWW="${PASSENGER_RESTART_WWW:-/var/www}"
+ETC="${PASSENGER_RESTART_ETC:-/etc/apache2}"
+
+DIR="${PASSENGER_RESTART_DIR:-public}"
+
+URI="${PASSENGER_RESTART_URI:-PassengerBaseURI}"
+APP="${PASSENGER_RESTART_APP:-PassengerAppRoot}"
+
+declare -A LST
+
+function name() {
+  readlink "$WWW"/*/"$1" | sed "s:/$DIR/\\?\$::"
+}
+
+function restart() {
+  [ -n "$1" ] && return
+  local name="${LST[$1]}"
+  passenger-config restart-app --name "${name:-$(name "$1")}"
+}
+
+if [ "$1" = "-h" -o "$1" = "--help" ]; then
+  echo "Usage: $0 [NAME...]"
+  exit
+fi
+
+[ $# -eq 0 ] && INT="1"
+
+while :; do
+  while read line; do
+    LST[${line#* /}]=$(awk "/$APP/{print \$2}" "${line%:*}")
+  done < <(grep -sR "^$URI /$1" "$ETC")
+
+  shift; [ -z "$1" ] && break
+done
+
+if [ -z "$INT" ]; then
+  for app in "${!LST[@]}"; do
+    restart "$app"
+  done
+else
+  select app in "${!LST[@]}"; do
+    restart "$app"
+  done
+fi

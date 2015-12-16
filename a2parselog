@@ -1,0 +1,53 @@
+#! /usr/bin/env ruby
+
+require 'resolv'
+require 'rack/utils'
+require 'nuggets/log_parser/apache'
+
+r = %r{ \b (?:
+    360Spider
+  | AdsBot-Google
+  | AhrefsBot
+  | Baidu
+  | Baiduspider
+  | bingbot
+  | BingPreview
+  | Crawler
+  | DotBot
+  | Ezooms
+  | Gigabot
+  | Googlebot
+  | gsa-crawler
+  | ia_archiver
+  | Mediapartners-Google
+  | msnbot
+  | seoscanners
+  | SiteUptime
+  | Slurp
+  | WordPress
+  | zgrab
+  | ZIBB
+  | ZyBorg
+) \b }xi
+
+s = %r{ \b (?:
+  crawl\.baidu\.com
+) \b }xi
+
+def h(d, i)
+  d.getname(i).to_s
+rescue ArgumentError, TypeError, Resolv::ResolvError, Errno::ENETUNREACH
+end
+
+trap(:INT) { exit }
+
+Resolv::DNS.open { |d| Nuggets::LogParser::Apache::Combined.parse($stdin) { |e|
+  next if e[:user_agent] =~ r
+
+  h = h(d, e[:ip])
+  next if h =~ s
+
+  e[:status] << " (#{Rack::Utils::HTTP_STATUS_CODES[e[:status].to_i]})"
+
+  puts "{ #{e.update(host: h).map { |k, v| "#{k}: #{v.inspect}" }.join(', ')} }"
+} }

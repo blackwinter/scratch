@@ -1,0 +1,76 @@
+#! /bin/bash
+
+set -euo pipefail
+
+function die() {
+  [ -n "${1:-}" ] && echo "$1" >&2
+  exit ${2:-1}
+}
+
+[ "$(id -u)" -ne 0 ] && die "Must be root!"
+
+[ $# -ne 1 ] && die "Usage: $0 <name>"
+
+name="$1"
+sdir="/etc/apache2"
+site="$sdir/sites-available/$name.conf"
+conf="$sdir/sites-conf.d/$name"
+skey="$sdir/ssl/$name.key"
+cert="$sdir/ssl/$name.pem"
+base="$conf/000-base.conf"
+root="/var/www/$name"
+host="$(hostname -f)"
+mail="www-admin"
+domn="$name.de"
+mark="#LE#"
+
+for file in "$site" "$conf" "$root"; do
+  [ -e "$file" ] && die "Site exists: $file" 2
+done
+
+echo "Creating $site:"
+tee "$site" <<<"\
+<VirtualHost *:80>
+	IncludeOptional sites-conf.d/$name/*.conf
+</VirtualHost>
+
+$mark<IfModule mod_ssl.c>
+$mark	<VirtualHost _default_:443>
+$mark		IncludeOptional sites-conf.d/$name/*.conf
+$mark
+$mark		Include ssl/ssl.conf
+$mark		SSLCertificateFile $cert
+$mark		SSLCertificateKeyFile $skey
+$mark	</VirtualHost>
+$mark
+$mark	Include ssl/ssl-server.conf
+$mark</IfModule>
+
+# vim: syntax=apache ts=4 sw=4 sts=4 sr noet"
+
+mkdir -v "$root"
+mkdir -v "$conf"
+
+echo "Creating $base:"
+tee "$base" <<<"\
+ServerName $domn
+ServerAlias *.$domn
+
+ServerAdmin $mail@${host,,?}
+
+LogLevel warn
+
+ErrorLog ${APACHE_LOG_DIR}/error.log
+CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+DocumentRoot $root
+
+<Directory $root>
+  Options +MultiViews
+</Directory>"
+
+a2ensite "$name"
+systemctl restart apache2
+
+echo "Creating $cert:"
+letsencrypt "$name" < /dev/null
