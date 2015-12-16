@@ -1,0 +1,267 @@
+#! /bin/bash
+
+set -euo pipefail
+
+function die() {
+  [ -n "${1:-}" ] && echo "$1" >&2
+  exit ${2:-1}
+}
+
+function pipe() {
+  echo -n "$1"
+}
+
+function secure_file() {
+  touch "$1" && chmod 600 "$1"
+}
+
+function write() {
+  [ -n "${2:-}" ] && secure_file "$1"
+  tee "$1" >/dev/null
+}
+
+function hex2bin64() {
+  xxd -r -p | urlbase64
+}
+
+function chomp() {
+  tr -d "\r\n"
+}
+
+function generate_key() {
+  [ ! -f "$1" ] && secure_file "$1" &&\
+    openssl genrsa -out "$1" "$key_size" 2>/dev/null
+}
+
+function urlbase64() {
+  openssl base64 -e | chomp | sed 's/=*$//g' | tr "+/" "-_"
+}
+
+function modulus() {
+  openssl rsa -in "$account_key" -noout -modulus | cut -d= -f2 | hex2bin64
+}
+
+function exponent() {
+  openssl rsa -in "$account_key" -noout -text |\
+    awk -F 0x '/^publicExponent: /{print $2}' |\
+    sed 's/)$//; s/^.\(..\)\+$/0&/' | hex2bin64
+}
+
+function sign() {
+  openssl dgst -sha256 -sign "$account_key"
+}
+
+function digest() {
+  openssl dgst -sha256 -binary
+}
+
+function checkend() {
+  openssl x509 -in "$site_certificate" -noout\
+    -checkend "$(($checkend_days * 24 * 60 * 60))"
+}
+
+function certificate_signing_request() {
+  local reqext="LE_SAN" common_name="${1%%, *}"
+
+  openssl req -new -sha256 -outform DER\
+    -key "$site_key" -subj "/CN=${common_name#$san_prefix}" -reqexts "$reqext"\
+    -config <(cat "$ssl_config" <(echo "[$reqext]") <(echo "subjectAltName=$1"))
+}
+
+function curl() {
+  command curl -sS "$@"
+}
+
+function nonce() {
+  curl -I "$acme_directory_endpoint" | awk '/^Replay-Nonce: /{print $2}' | chomp
+}
+
+function signed_request() {
+  local uri="$1"; shift
+
+  local protected="$(construct_json "$header" nonce "$(nonce)" | urlbase64)"
+  local payload="$(construct_json "" resource "$@" | urlbase64)"
+
+  local signature="$(pipe "$protected.$payload" | sign | urlbase64)"
+
+  construct_json ""\
+    header    "$header"    \
+    protected "$protected" \
+    payload   "$payload"   \
+    signature "$signature" | curl "$uri" -d @-
+}
+
+function request_new() {
+  local resource="new-$1"; shift
+  local endpoint="$(curl "$acme_directory_endpoint" | json_string "$resource")"
+
+  [ -z "$endpoint" ] && die "No such endpoint: $resource"
+
+  signed_request "$endpoint" "$resource" "$@"
+}
+
+function request_registration() {
+  request_new reg\
+    contact "[\"mailto:$(server_config Admin)\"]" agreement "$terms_of_service"
+}
+
+function request_authorization() {
+  request_new authz identifier "{\"type\": \"dns\", \"value\": \"$1\"}"
+}
+
+function request_challenge() {
+  signed_request "$1" challenge keyAuthorization "$2"
+}
+
+function request_certificate() {
+  request_new cert csr "$(certificate_signing_request "$1" | urlbase64)"
+}
+
+function simple_http_challenge() {
+  request_authorization "$1" | json_array challenges | grep "http-01"
+}
+
+function challenge_token() {
+  pipe "$1" | json_string token | sed 's/[^A-Za-z0-9_-]/_/g'
+}
+
+function perform_challenge() {
+  request_challenge "$1" "$2" | json_string status
+}
+
+function create_certificate() {
+  echo "-----BEGIN CERTIFICATE-----"
+  request_certificate "$1" | openssl base64 -e | fold -w 64
+  echo "-----END CERTIFICATE-----"
+  cat "$chain_certificate"
+  openssl dhparam 2048 2>/dev/null
+}
+
+function json_string() {
+  grep -o "\"$1\": *\"[^\"]*\"" | cut -d\" -f4
+}
+
+function json_array() {
+  grep -o "\"$1\": *\[[^]]*\]" | tr "{" "\n"
+}
+
+function construct_json() {
+  local json="$1" regex="^[{\[]" quote=""; shift
+
+  [ -n "$json" ] && json="${json#\{}" && json="${json%\}}" && json+=", "
+
+  while [ -n "${1:-}" ]; do
+    [[ "$2" =~ $regex ]] && quote="" || quote="\""
+    json+="\"$1\": $quote$2$quote, "
+    shift 2
+  done
+
+  pipe "{${json%, }}"
+}
+
+function server_config() {
+  awk "/^Server$1/{print \$2}" "$server_config"
+}
+
+function get_certificate() {
+  local jwk="{\"e\": \"$(exponent)\", \"kty\": \"RSA\", \"n\": \"$(modulus)\"}"
+  local header="{\"alg\": \"RS256\", \"jwk\": $jwk}"  # used in signed_request()
+
+  [ -n "$request_registration" ] && request_registration
+
+  mkdir -p "$challenge_directory"
+
+  local altnames="" domain=""
+
+  for domain in $(server_config "(Name|Alias)" | sed 's/\*/www/'); do
+    altnames+="$san_prefix$domain, "
+
+    local challenge="$(simple_http_challenge "$domain")"
+    local challenge_token="$(challenge_token "$challenge")"
+
+    local key_authorization="$challenge_token.$(pipe "${jwk// }" | digest | urlbase64)"
+    local challenge_file="$challenge_directory/$challenge_token"
+
+    pipe "$key_authorization" | write "$challenge_file"
+
+    local challenge_uri="$(pipe "$challenge" | json_string uri)"
+    local challenge_status="$(perform_challenge "$challenge_uri" "$key_authorization")"
+
+    while [ "$challenge_status" = "pending" ]; do
+      sleep 1
+      challenge_status="$(curl "$challenge_uri" | json_string status)"
+    done
+
+    rm -f "$challenge_file"
+  done
+
+  create_certificate "${altnames%, }" | write "$site_certificate" 1
+}
+
+function update_site_config() {
+  local regex="^$config_marker"
+
+  if grep -q "$regex" "$site_config"; then
+    sed -i "s/$regex//" "$site_config"
+  elif [ -t 0 ]; then
+    echo "$site_config:
+
+  SSLCertificateFile $site_certificate
+  SSLCertificateKeyFile $site_key
+"
+
+    read -ep "Finish..."
+  fi
+}
+
+[ "$(id -u)" -ne 0 ] && die "Must be root!"
+
+case $# in
+  1 ) site="$1";;
+  0 ) site="default"; webroot="html";;
+  * ) die "Usage: $0 [<site>]";;
+esac
+
+key_size="4096"
+checkend_days="30"
+
+san_prefix="DNS:"
+config_marker="#LE#"
+
+acme_directory_endpoint="https://acme-v01.api.letsencrypt.org/directory"
+terms_of_service="https://letsencrypt.org/documents/LE-SA-v1.0.1-July-27-2015.pdf"
+
+challenge_directory="/var/www/${webroot:-$site}/.well-known/acme-challenge"
+ssl_config="$(openssl version -d | cut -d\" -f2)/openssl.cnf"
+
+[ -f "$ssl_config" ] || die "No such file: $ssl_config"
+
+server_directory="/etc/apache2"
+store_directory="$server_directory/ssl"
+server_config="$server_directory/sites-conf.d/$site/000-base.conf"
+site_config="$server_directory/sites-available/${webroot:+000-}$site.conf"
+
+[ -f "$server_config" ] || die "No such file: $server_config"
+
+account_key="$store_directory/letsencrypt.key"
+chain_certificate="$store_directory/letsencrypt.pem"
+
+site_key="$store_directory/$site.key"
+site_certificate="$store_directory/$site.pem"
+
+if [ -e "$challenge_directory" ]; then
+  rmdir "$challenge_directory" 2>/dev/null ||\
+    die "Challenge directory not empty: $challenge_directory"
+fi
+
+[ -f "$site_certificate" ] && checkend && exit
+
+request_registration=""
+
+generate_key "$account_key" && request_registration="1"
+generate_key "$site_key" || true
+
+get_certificate
+update_site_config
+
+systemctl reload apache2
