@@ -15,7 +15,7 @@ solr_tmp_dir="$(mktemp -d)"
 function die() {
   [ -d "$solr_tmp_dir" ] && cd && rm -r "$solr_tmp_dir"
   [ -n "$1" ] && echo "$1" >&2
-  exit ${2:-1}
+  exit "${2:-1}"
 }
 
 [ -z "$solr_version" ] && die "Usage: $0 <solr-version> [<solr-service>]"
