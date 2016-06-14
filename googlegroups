@@ -1,13 +1,18 @@
 #! /bin/bash
 
-[ $# -ne 2 ] && echo "Usage: $0 {sub|unsub} <group>" && exit 1
-
 a="lists@blackwinter.de"
 h="googlegroups.com"
+
+function die() {
+  echo "Usage: $0 {sub|unsub} <group>" >&2
+  exit 1
+}
 
 function cmd() {
   mail -s "$2" -a "From: $a" "$1@$h" <<<""
 }
+
+[ $# -ne 2 ] && die
 
 case "$1" in
   sub* )
@@ -17,4 +22,8 @@ case "$1" in
     ;;
   unsub* )
     cmd "googlegroups-manage+$2+unsubscribe"
+    ;;
+  * )
+    die
+    ;;
 esac
