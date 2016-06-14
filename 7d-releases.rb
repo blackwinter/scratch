@@ -111,7 +111,7 @@ if $0 == __FILE__
   require 'nuggets/argv/option'
 
   USAGE = <<-EOT
-Usage: #{$0} [-k <key-file>] [-c <country>] [-d <date:YYYY-MM-DD>] <artist>...
+Usage: #{$0} [-k <key-file>] [-c <country>] [-d <date:YYYY-MM-DD>] [-p] <artist>...
   EOT
 
   abort USAGE if ARGV.empty?
