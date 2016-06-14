@@ -7,9 +7,12 @@ solr_user_id="solr"
 solr_service="solr${2:+-$2}"
 solr_dirname="solr-$solr_version"
 solr_archive="$solr_dirname.tgz"
+solr_binwrap="/usr/local/bin/$solr_service"
+solr_include="/etc/default/$solr_service.in.sh"
 solr_var_dir="/var/opt/solr"
 solr_ext_dir="/opt"
 solr_opt_dir="$solr_ext_dir/$solr_dirname"
+solr_srv_dir="$solr_ext_dir/$solr_service"
 solr_tmp_dir="$(mktemp -d)"
 
 function die() {
@@ -41,7 +44,7 @@ if [ -e "/etc/init.d/$solr_service" ]; then
   sudo tar xf "$solr_archive" -C "$solr_ext_dir"
   sudo chown -R "$solr_user_id:" "$solr_opt_dir"
 
-  sudo ln -nfs "$solr_opt_dir" "$solr_ext_dir/$solr_service"
+  sudo ln -nfs "$solr_opt_dir" "$solr_srv_dir"
 
   sudo systemctl restart "$solr_service"
 else
@@ -57,6 +60,16 @@ else
   sudo ./install_solr_service.sh \
     "$solr_archive" -d "$solr_var_dir/${solr_service#*-}" \
     -i "$solr_ext_dir" -s "$solr_service" -u "$solr_user_id"
+
+  [ -e "$solr_binwrap" ] && die "File already exists: $solr_binwrap"
+
+  sudo tee "$solr_binwrap" > /dev/null <<EOT
+#!/usr/bin/env bash
+
+exec sudo sudo -u "$solr_user_id" env SOLR_INCLUDE="$solr_include" "$solr_srv_dir/bin/solr" "\$@"
+EOT
+
+  sudo chmod +x "$solr_binwrap"
 fi
 
 die "" 0
