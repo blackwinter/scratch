@@ -77,12 +77,12 @@ function nonce() {
 }
 
 function signed_request() {
-  local uri="$1"; shift
+  local uri="$1" protected payload signature; shift
 
-  local protected="$(construct_json "$header" nonce "$(nonce)" | urlbase64)"
-  local payload="$(construct_json "" resource "$@" | urlbase64)"
+  protected="$(construct_json "$header" nonce "$(nonce)" | urlbase64)"
+  payload="$(construct_json "" resource "$@" | urlbase64)"
 
-  local signature="$(pipe "$protected.$payload" | sign | urlbase64)"
+  signature="$(pipe "$protected.$payload" | sign | urlbase64)"
 
   construct_json ""\
     header    "$header"    \
@@ -92,9 +92,9 @@ function signed_request() {
 }
 
 function request_new() {
-  local resource="new-$1"; shift
-  local endpoint="$(curl "$acme_directory_endpoint" | json_string "$resource")"
+  local resource="new-$1" endpoint; shift
 
+  endpoint="$(curl "$acme_directory_endpoint" | json_string "$resource")"
   [ -z "$endpoint" ] && die "No such endpoint: $resource"
 
   signed_request "$endpoint" "$resource" "$@"
@@ -164,28 +164,29 @@ function server_config() {
 }
 
 function get_certificate() {
-  local jwk="{\"e\": \"$(exponent)\", \"kty\": \"RSA\", \"n\": \"$(modulus)\"}"
-  local header="{\"alg\": \"RS256\", \"jwk\": $jwk}"  # used in signed_request()
+  local jwk header altnames="" domain="" challenge challenge_token\
+    key_authorization challenge_file challenge_uri challenge_status
+
+  jwk="{\"e\": \"$(exponent)\", \"kty\": \"RSA\", \"n\": \"$(modulus)\"}"
+  header="{\"alg\": \"RS256\", \"jwk\": $jwk}"  # used in signed_request()
 
   [ -n "$request_registration" ] && request_registration
 
   mkdir -p "$challenge_directory"
 
-  local altnames="" domain=""
-
   for domain in $(server_config "(Name|Alias)" | sed 's/\*/www/'); do
     altnames+="$san_prefix$domain, "
 
-    local challenge="$(simple_http_challenge "$domain")"
-    local challenge_token="$(challenge_token "$challenge")"
+    challenge="$(simple_http_challenge "$domain")"
+    challenge_token="$(challenge_token "$challenge")"
 
-    local key_authorization="$challenge_token.$(pipe "${jwk// }" | digest | urlbase64)"
-    local challenge_file="$challenge_directory/$challenge_token"
+    key_authorization="$challenge_token.$(pipe "${jwk// }" | digest | urlbase64)"
+    challenge_file="$challenge_directory/$challenge_token"
 
     pipe "$key_authorization" | write "$challenge_file"
 
-    local challenge_uri="$(pipe "$challenge" | json_string uri)"
-    local challenge_status="$(perform_challenge "$challenge_uri" "$key_authorization")"
+    challenge_uri="$(pipe "$challenge" | json_string uri)"
+    challenge_status="$(perform_challenge "$challenge_uri" "$key_authorization")"
 
     while [ "$challenge_status" = "pending" ]; do
       sleep 1
