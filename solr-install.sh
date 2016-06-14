@@ -21,9 +21,11 @@ function die() {
 [ -z "$solr_version" ] && die "Usage: $0 <solr-version> [<solr-service>]"
 
 function fetch() {
-  local path="lucene/solr/$solr_version/$solr_archive"
+  local path url
 
-  local url="$(curl -s "http://apache.org/dyn/closer.lua/$path" \
+  path="lucene/solr/$solr_version/$solr_archive"
+
+  url="$(curl -s "http://apache.org/dyn/closer.lua/$path" \
     | grep -om1 '<strong>.*</strong>' | sed 's/[^>]*>//; s/<.*//')"
 
   curl -O "$url" || die "Download failed: $url"
