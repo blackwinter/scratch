@@ -15,7 +15,7 @@ function name() {
 }
 
 function restart() {
-  [ -n "$1" ] && return
+  [ -z "$1" ] && return
   local name="${LST[$1]}"
   passenger-config restart-app --name "${name:-$(name "$1")}"
 }
@@ -44,3 +44,5 @@ else
     restart "$app"
   done
 fi
+
+# vim:ft=sh
