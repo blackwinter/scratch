@@ -118,7 +118,9 @@ function request_certificate() {
 }
 
 function simple_http_challenge() {
-  request_authorization "$1" | json_array challenges | grep "http-01"
+  request_authorization "$1" | chomp |\
+    grep -o '"challenges": *\[[^]]*\]' |\
+    grep -o '"type": *"http-01",[^}]*'
 }
 
 function challenge_token() {
@@ -139,10 +141,6 @@ function create_certificate() {
 
 function json_string() {
   grep -o "\"$1\": *\"[^\"]*\"" | cut -d\" -f4
-}
-
-function json_array() {
-  grep -o "\"$1\": *\[[^]]*\]" | tr "{" "\n"
 }
 
 function construct_json() {
