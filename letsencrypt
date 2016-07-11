@@ -228,7 +228,7 @@ san_prefix="DNS:"
 config_marker="#LE#"
 
 acme_directory_endpoint="https://acme-v01.api.letsencrypt.org/directory"
-terms_of_service="https://letsencrypt.org/documents/LE-SA-v1.0.1-July-27-2015.pdf"
+terms_of_service="https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf"
 
 challenge_directory="/var/www/${webroot:-$site}/.well-known/acme-challenge"
 ssl_config="$(openssl version -d | cut -d\" -f2)/openssl.cnf"
