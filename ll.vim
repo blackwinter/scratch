@@ -2,7 +2,7 @@
 " from <http://lug.fh-swf.de/vim/vim-textfilter/vim-textfilter.html>).
 
 map ll :call FindLongestLine('a')<CR>
-"map ln :call FindLongestLine('n')<CR>
+map ln :call FindLongestLine('n')<CR>
 vmap ll :call FindLongestLine('v')<CR>
 
 function! FindLongestLine(mode)
