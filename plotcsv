@@ -5,7 +5,7 @@
 #                                                                             #
 # plotcsv -- Plot CSV data using Gnuplot                                      #
 #                                                                             #
-# Copyright (C) 2011-2014 Jens Wille                                          #
+# Copyright (C) 2011-2016 Jens Wille                                          #
 #                                                                             #
 # Authors:                                                                    #
 #     Jens Wille <jens.wille@uni-koeln.de>                                    #
@@ -65,9 +65,13 @@ module PlotCSV
   }
 
   def run(argv = ARGV, *plot_args, &block)
-    options = parse_options(argv)
-    data, names = read(argv, options)
-    plot(data, names, options, *plot_args, &block)
+    options = parse_options(argv); args = read(argv, options) << options
+
+    if plot_args.empty? && $stdout.tty? && cmd = Gnuplot.which('display')
+      IO.popen(cmd, 'w') { |io| plot(*args, false, out: io.fileno, &block) }
+    else
+      plot(*args, *plot_args, &block)
+    end
   end
 
   def read(files, options = {})
