@@ -40,7 +40,7 @@ module PlotCSV
 
   extend self
 
-  VERSION = '0.0.3'
+  VERSION = '0.0.4'
 
   USAGE = "Usage: #{$0} [options] <csv>..."
 
@@ -123,7 +123,7 @@ module PlotCSV
 
           if aggregate
             key = row.values_at(*aggregate) << label
-            seen = aggregates.has_key?(key)
+            seen = aggregates.key?(key)
 
             aggregates[key] += value
             next if seen
@@ -144,14 +144,17 @@ module PlotCSV
   def plot(data, names, options = {}, *plot_args)
     return if data.empty?
 
-    x = options[:width]  || data.values.map { |v| v.size }.max.between(1024, 8192)
+    x = options[:width]  || data.values.map(&:size).max.between(1024, 8192)
     y = options[:height] || data.values.flatten.max.between(512, 768)
 
     title, style, mean, fit = names.join(' / '), *options.values_at(
       :style, :mean, :linear_fit
     )
 
-    opts = options.map { |k, v| "#{k}=#{v.inspect}" if v }.compact.sort.join(', ')
+    opts = options.map { |k, v|
+      "#{k}=#{v.inspect}" if v
+    }.compact.sort.join(', ')
+
     title << '\n' << opts.tr('"', "'") unless opts.empty?
 
     Gnuplot.plot(*plot_args) { |plot|
@@ -186,7 +189,7 @@ module PlotCSV
 
   def parse_options(arguments, options = DEFAULTS)
     option_parser(options).parse!(arguments)
-    arguments << '-'  if arguments.empty?
+    arguments << '-' if arguments.empty?
     options
   end
 
@@ -337,7 +340,8 @@ module PlotCSV
     ary = []
 
     1.upto(range) { |i| [-1, 1].each { |s|
-      ary << ((row = rows[index + (s * i)]) && row[label] || default)
+      row = rows[index + (s * i)]
+      ary << (row && row[label] || default)
     } }
 
     rows[index][label] = ary.mean
