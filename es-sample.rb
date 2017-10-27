@@ -10,7 +10,7 @@ opts = %W[[#{help = '--help'}]]
 
 flag = lambda { |short, long|
   opts << "[#{short_switch = "-#{short}"}|#{long_switch = "--#{long}"}]"
-  [ARGV.delete(short_switch), ARGV.delete(long_switch)].compact.first
+  [ARGV.delete(short_switch), ARGV.delete(long_switch)].any?
 }
 
 opt = lambda { |key, value, default = nil, multi = false, &block|
@@ -49,12 +49,15 @@ if ARGV.empty? || ARGV.include?(help)
   exit
 end
 
-dump, match = JSON.method("#{pretty ? :pretty : :fast}_generate"),
-  random ? { function_score: { query: query, random_score: {} } } : query
-
-base, scroll, type, docs, gz = ARGV.shift, '10s', nil, [], /\.gz(?:ip)?\z/i
+base, type, docs, gz, header = ARGV.shift, nil, [],
+  /\.gz(?:ip)?\z/i, { 'Content-Type' => 'application/json' }
 
 def docs.<<(*); end if ARGV.empty?
+
+scroll, scroll_ids, scroll_path = '10s', [], '_search/scroll'
+
+dump, match = JSON.method("#{pretty ? :pretty : :fast}_generate"),
+  random ? { function_score: { query: query, random_score: {} } } : query
 
 net = Hash.new { |h, k|
   h[k] = [uri = URI(k), Net::HTTP.new(uri.hostname, uri.port).tap { |http|
@@ -67,7 +70,7 @@ post = lambda { |path, data|
   uri, http = net[host]
   uri = uri.merge(path)
 
-  res = http.post(uri.request_uri, data.to_json)
+  res = http.post(uri.request_uri, data.to_json, header)
   abort "ERROR: #{res.code} #{res.msg} - #{uri}" unless res.is_a?(Net::HTTPOK)
 
   json = JSON.parse(res.body)
@@ -87,7 +90,11 @@ paths = lambda { |value, keys, *path|
 
 fetch = lambda { |*args, &block|
   json = post[*args]
-  json['_scroll_id'] unless each.(json) { |doc|
+
+  id = json['_scroll_id']
+  scroll_ids << id if id
+
+  id unless each.(json) { |doc|
     paths[doc['_source'], keys = []]
 
     next if existing && !existing.any? { |list| (list - keys).empty? }
@@ -102,14 +109,14 @@ fetch = lambda { |*args, &block|
 }
 
 write = lambda { |index = nil, &block|
-  b = lambda { |io| block[lambda { |doc|
-    c = doc['_source'] and io.puts(dump[c]) }] }
+  _block = lambda { |io| block[lambda { |doc|
+    hash = doc['_source'] and io.puts(dump[hash]) }] }
 
-  output == '-' ? b[$stdout] : begin
+  output == '-' ? _block[$stdout] : begin
     puts name = output || "#{index || base}.jsonl"
 
     File.open(name, index && output ? 'a' : 'w') { |f|
-      name =~ gz ? Zlib::GzipWriter.new(f).tap(&b).close : b[f] }
+      name =~ gz ? Zlib::GzipWriter.new(f).tap(&_block).close : _block[f] }
   end
 }
 
@@ -123,7 +130,16 @@ write.() { |block|
   id = fetch.("#{base}/_search?scroll=#{scroll}", q, &block)
 
   while id
-    id = fetch.("_search/scroll?scroll=#{scroll}", scroll_id: id, &block)
+    id = fetch.("#{scroll_path}?scroll=#{scroll}", scroll_id: id, &block)
+  end
+
+  unless scroll_ids.empty?
+    uri, http = net[host]
+
+    req = Net::HTTP::Delete.new(uri.merge(scroll_path).request_uri, header)
+    req.body = { scroll_id: scroll_ids }.to_json
+
+    http.request(req)
   end
 }
 
