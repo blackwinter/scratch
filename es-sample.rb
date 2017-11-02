@@ -146,7 +146,14 @@ class EsSample
     uri, http = NET[host]
     uri = uri.merge(path)
 
-    res = http.post(uri.request_uri, data.to_json, HEADER)
+    try = 2
+
+    res = begin
+      http.post(uri.request_uri, data.to_json, HEADER)
+    rescue EOFError => err
+      (try -= 1) > 0 ? (warn err; retry) : raise
+    end
+
     raise "#{res.code} #{res.msg} - #{uri}" unless res.is_a?(Net::HTTPOK)
 
     json = JSON.parse(res.body)
