@@ -30,7 +30,7 @@ class EsSample
       when Array then value.each { |   v| traverse(v, keys, *path)    }
     end
 
-    path.empty? ? keys.sort!.uniq! : keys << path.join('.')
+    path.empty? ? keys.sort!.tap(&:uniq!) : keys << path.join('.')
   end
 
   def initialize(opts = {})
