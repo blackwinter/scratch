@@ -1,44 +1,15 @@
 #! /bin/bash
 
-omit=""
-for pid in $(pidof konsole); do
-  omit="$omit -o $pid"
+s="sleep 0.1"
+
+t="$(mktemp)"
+while [ -n "$1" ]; do
+  echo "title: %w [$1];; command: $1;; workdir: ~" >> "$t"; shift
 done
 
-${MULTI_KONSOLE:-konsole} --nofork 2> /dev/null &
+${MULTI_KONSOLE:-konsole} --tabs-from-file "$t" -e $s 2>/dev/null &
 
-cmd="pidof $omit konsole"; pid=""; i=0
+q="qdbus org.kde.konsole-$!"; i=0
+until $q &>/dev/null || [ $i -gt 100 ]; do $s; ((i++)); done
 
-until [ -n "$pid" ]; do
-  pid="$($cmd)"
-  ((i++))
-  [ $i -gt 100 ] && echo "$cmd: max retries exceeded" && exit 1
-done
-
-qdb="qdbus org.kde.konsole-$pid"
-cmd="$qdb /Konsole currentSession"; sid=""; i=0
-
-until [ -n "$sid" ]; do
-  sid="$($cmd 2> /dev/null)"
-  ((i++))
-  [ $i -gt 100 ] && echo "$cmd: max retries exceeded" && exit 1
-done
-
-while [ $# -gt 0 ]; do
-  sess="$qdb /Sessions/$sid"
-  cmd="$1"; i=0; shift
-
-  echo "[$pid] $sid: $cmd"
-
-  until $sess > /dev/null; do
-    ((i++))
-    [ $i -gt 100 ] && echo "$sess: max retries exceeded" && exit 1
-  done
-
-  $sess > /dev/null setTitle 1 "$($sess title 1) [$cmd]"
-  $sess > /dev/null sendText "$cmd"$'\n'
-
-  [ $# -gt 0 ] && sid="$($qdb /Konsole newSession 2> /dev/null)"
-done
-
-exit 0
+rm "$t"
