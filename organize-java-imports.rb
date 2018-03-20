@@ -1,6 +1,6 @@
 #! /usr/bin/env ruby
 
-out, imp, buf, del, com = [], Hash.new { |h, k| h[k] = [] }, [], [], nil
+out, imp, buf, del, pkg, com = [], Hash.new { |h, k| h[k] = [] }, [], [], nil, nil
 
 ARGF.each { |line|
   out << line.dup
@@ -13,12 +13,15 @@ ARGF.each { |line|
 
   next if line.empty?
 
-  if line =~ /\Aimport\s+.*?([^.\s*]+)\s*;/
-    imp[$1] << $. - 1
-  else
-    line.scan(/\b(#{Regexp.union(*imp.keys)})\b/) {
-      del.concat(imp.delete($1).drop(1)) if imp.key?($1)
-    }
+  case line
+    when /\Apackage\s+([\w.]+);/
+      pkg = $1
+    when /\Aimport\s+(.*?)([^.\s*]+)\s*;/
+      ($1 == pkg + '.' ? del : imp[$2]) << $. - 1
+    else
+      line.scan(/\b(#{Regexp.union(*imp.keys)})\b/) {
+        del.concat(imp.delete($1).drop(1)) if imp.key?($1)
+      }
   end
 }
 
