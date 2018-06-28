@@ -5,10 +5,10 @@
 #                                                                             #
 # plotcsv -- Plot CSV data using Gnuplot                                      #
 #                                                                             #
-# Copyright (C) 2011-2016 Jens Wille                                          #
+# Copyright (C) 2011-2018 Jens Wille                                          #
 #                                                                             #
 # Authors:                                                                    #
-#     Jens Wille <jens.wille@uni-koeln.de>                                    #
+#     Jens Wille <jens.wille@gmail.com>                                       #
 #                                                                             #
 # plotcsv is free software; you can redistribute it and/or modify it under    #
 # the terms of the GNU Affero General Public License as published by the Free #
@@ -26,327 +26,422 @@
 ###############################################################################
 #++
 
-gem 'blackwinter-gnuplot'
-require 'gnuplot'
-
-require 'optparse'
 require 'csv'
+require 'optparse'
 
 require 'nuggets/array/mean'
 require 'nuggets/array/regression'
+require 'nuggets/file/which'
 require 'nuggets/numeric/limit'
 
-module PlotCSV
+class Array
 
-  extend self
-
-  VERSION = '0.0.4'
-
-  USAGE = "Usage: #{$0} [options] <csv>..."
-
-  DEFAULTS = {
-    aggregate:  nil,
-    comment:    nil,
-    delimiter:  ',',
-    empty:      nil,
-    height:     nil,
-    linear_fit: false,
-    max_x:      nil,
-    max_y:      nil,
-    mean:       false,
-    min_x:      nil,
-    min_y:      nil,
-    notitle:    nil,
-    range:      nil,
-    skip_lines: nil,
-    style:      'lines',
-    terminal:   'png',
-    width:      nil
-  }
-
-  def run(argv = ARGV, *plot_args, &block)
-    options = parse_options(argv); args = read(argv, options) << options
-
-    if plot_args.empty? && $stdout.tty? && cmd = Gnuplot.which('display')
-      IO.popen(cmd, 'w') { |io| plot(*args, false, out: io.fileno, &block) }
-    else
-      plot(*args, *plot_args, &block)
+  def to_gplot(io)
+    case x = first
+      when Numeric
+        each { |i| io << "#{i}\n" }
+      when Array
+        x.zip(*drop(1)) { |a| io << a.join(' ') << "\n" }
+        io << 'e'
     end
-  end
 
-  def read(files, options = {})
-    data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
-    range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
-
-    files, opts = Array(files), {
-      headers:    true,
-      converters: :numeric,
-      col_sep:    options[:delimiter],
-      skip_lines: options[:skip_lines]
-    }
-
-    multiple = files.size > 1
-
-    files.each { |file|
-      names << name = File.basename(file, '.csv')
-
-      prefix = "#{name}:" if multiple
-
-      rows = []
-
-      if file == '-'
-        begin
-          csv = CSV.new($stdin, opts)
-          csv.each { |row| rows << row }
-        ensure
-          csv.close if csv
-        end
-      else
-        CSV.foreach(file, opts) { |row| rows << row }
-      end
-
-      unless range.nil? || rows.empty? || !range.delete(:exclude)
-        range.replace((0...rows.first.headers.size).to_a - range)
-      end
-
-      rows.each_with_index { |row, rindex|
-        row.each_with_index { |(label, value), index|
-          next unless range.nil? || range.include?(index)
-
-          case empty
-            when false then next
-            when Array then value = interpolate(rows, rindex, label, *empty)
-            else            value = empty
-          end if value.nil?
-
-          label.insert(0, prefix) if prefix
-
-          if aggregate
-            key = row.values_at(*aggregate) << label
-            seen = aggregates.key?(key)
-
-            aggregates[key] += value
-            next if seen
-
-            value = key
-          end
-
-          data[label] << value
-        }
-      }
-    }
-
-    data.each_value { |values| values.map! { |v| aggregates[v] } } if aggregate
-
-    [data, names]
-  end
-
-  def plot(data, names, options = {}, *plot_args)
-    return if data.empty?
-
-    x = options[:width]  || data.values.map(&:size).max.between(1024, 8192)
-    y = options[:height] || data.values.flatten.max.between(512, 768)
-
-    title, style, mean, fit = names.join(' / '), *options.values_at(
-      :style, :mean, :linear_fit
-    )
-
-    opts = options.map { |k, v|
-      "#{k}=#{v.inspect}" if v
-    }.compact.sort.join(', ')
-
-    title << '\n' << opts.tr('"', "'") unless opts.empty?
-
-    Gnuplot.plot(*plot_args) { |plot|
-      plot.terminal "#{options[:terminal]} size #{x}, #{y}"
-
-      plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
-      plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
-
-      plot.title title unless options[:notitle]
-
-      post_plot = yield data, plot if block_given?
-
-      data.sort.each { |label, values|
-        plot.data(values) { |ds|
-          ds.with, ds.title = style, label
-        } unless mean == :only || fit == :only
-
-        plot.data(Array.new(values.size, values.mean)) { |ds|
-          ds.with, ds.title = 'lines', "#{label} (mean)"
-        } if mean
-
-        plot.data(values.llsq.map { |_, i| i }) { |ds|
-          ds.with, ds.title = 'lines', "#{label} (fit)"
-        } if fit
-      }
-
-      post_plot.call if post_plot.respond_to?(:call)
-    }
-  end
-
-  private
-
-  def parse_options(arguments, options = DEFAULTS)
-    option_parser(options).parse!(arguments)
-    arguments << '-' if arguments.empty?
-    options
-  end
-
-  def option_parser(options = {})
-    OptionParser.new { |opts|
-      opts.banner = USAGE
-
-      opts.separator ''
-      opts.separator 'Options:'
-
-      opts.on('-t', '--terminal TERMINAL', "Gnuplot terminal [Default: '#{options[:terminal]}']") { |t|
-        options[:terminal] = t
-      }
-
-      opts.on('-s', '--style STYLE', "Gnuplot line style [Default: '#{options[:style]}']") { |s|
-        options[:style] = s
-      }
-
-      opts.separator ''
-
-      opts.on('-T', '--notitle', "Don't add title to plot") {
-        options[:notitle] = true
-      }
-
-      opts.on('-C', '--comment COMMENT', 'Comment to add onto plot') { |c|
-        options[:comment] = c
-      }
-
-      opts.separator ''
-
-      opts.on('-r', '--range COLUMNS', "Column range (ex: '0-3,6,8') [Default: all]") { |r|
-        options[:range] = column_ranges(r)
-      }
-
-      opts.on('-a', '--aggregate COLUMNS', 'Columns to aggregate on [Default: none]') { |c|
-        options[:aggregate] = column_ranges(c)
-      }
-
-      opts.separator ''
-
-      opts.on('-S', '--skip-empty', 'Skip empty fields') {
-        options[:empty] = false
-      }
-
-      opts.on('-Z', '--zero-empty', 'Use zero for empty fields') {
-        options[:empty] = 0
-      }
-
-      opts.on('-E', '--empty INTEGER', Integer, 'Use INTEGER for empty fields') { |i|
-        options[:empty] = i
-      }
-
-      opts.on('-P', '--interpolate-empty [RANGE[:DEFAULT]]', /\A\d+(?::[\d.]+)?\z/, 'Interpolate empty fields') { |i|
-        r, d = i.split(':') if i
-        options[:empty] = [(r = r.to_i).zero? ? 1 : r, d.to_f]
-      }
-
-      opts.separator ''
-
-      opts.on('-d', '--delimiter STRING', "Field delimiter [Default: '#{options[:delimiter]}']") { |d|
-        options[:delimiter] = d
-      }
-
-      opts.on('-k', '--skip-lines REGEX', 'Skip matching lines [Default: none]') { |k|
-        options[:skip_lines] = Regexp.new(k)
-      }
-
-      opts.separator ''
-
-      opts.on('-W', '--width WIDTH', Integer, 'Terminal width [Default: auto]') { |w|
-        options[:width] = w
-      }
-
-      opts.on('-H', '--height HEIGHT', Integer, 'Terminal height [Default: auto]') { |h|
-        options[:height] = h
-      }
-
-      opts.separator ''
-
-      opts.on('-I', '--min-x MIN', Integer, 'Min x value [Default: auto]') { |i|
-        options[:min_x] = i
-      }
-
-      opts.on('-M', '--max-x MAX', Integer, 'Max x value [Default: auto]') { |m|
-        options[:max_x] = m
-      }
-
-      opts.on('-i', '--min-y MIN', Integer, 'Min y value [Default: auto]') { |i|
-        options[:min_y] = i
-      }
-
-      opts.on('-m', '--max-y MAX', Integer, 'Max y value [Default: auto]') { |m|
-        options[:max_y] = m
-      }
-
-      opts.separator ''
-
-      opts.on('-n', '--mean', "Add arithmetic mean line (ignores '-s')") {
-        options[:mean] = true
-      }
-
-      opts.on('-N', '--mean-only', "Plot arithmetic mean only (implies '-n')") {
-        options[:mean] = :only
-      }
-
-      opts.on('-l', '--linear-fit', "Add linear fit line (ignores '-s')") {
-        options[:linear_fit] = true
-      }
-
-      opts.on('-L', '--linear-fit-only', "Plot linear fit only (implies '-l')") {
-        options[:linear_fit] = :only
-      }
-
-      opts.separator ''
-      opts.separator 'Generic options:'
-
-      opts.on('-h', '--help', 'Print this help message and exit') {
-        abort opts.to_s
-      }
-
-      opts.on('--version', 'Print program version and exit') {
-        abort "#{File.basename($0)} v#{VERSION}"
-      }
-    }
-  end
-
-  def column_ranges(string)
-    a, b = [], []
-
-    string.split(',').each { |range|
-      if range =~ %r{\A(\^)?(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
-        ($1 ? b : a).concat($2.to_i.step(
-          ($3 || $2).to_i, ($4 || 1).to_i).to_a)
-      else
-        abort "Illegal range: #{range} (#{string})"
-      end
-    }
-
-    if a.empty? && !b.empty?
-      b << :exclude
-    else
-      a -= b
-      a unless a.empty?
-    end
-  end
-
-  def interpolate(rows, index, label, range, default)
-    ary = []
-
-    1.upto(range) { |i| [-1, 1].each { |s|
-      row = rows[index + (s * i)]
-      ary << (row && row[label] || default)
-    } }
-
-    rows[index][label] = ary.mean
+    io
   end
 
 end
 
-PlotCSV.run if $0 == __FILE__
+class Plot
+
+  QUOTED = %w[title output xlabel ylabel]
+
+  def self.plot(persist = true, *args, &block)
+    cmd = File.which('gnuplot') or abort 'gnuplot executable not found'
+
+    opts = args.last.is_a?(Hash) ? args.pop : {}
+    IO.popen(cmd, 'w', opts) { |gp| new(gp, *args, &block) }
+  end
+
+  def initialize(io = nil)
+    @data, @sets = [], []
+
+    yield self if block_given?
+
+    to_gplot(io) if io
+  end
+
+  def method_missing(method, val = '')
+    @sets << [var = method.to_s,
+      QUOTED.include?(var) && val !~ /\A'.*'\z/ ? %Q{"#{val}"} : val]
+  end
+
+  def data(*args, &block)
+    @data << DataSet.new(args, &block)
+  end
+
+  def to_gplot(io)
+    @sets.each { |var, val| io << "set #{var} #{val}\n" }
+
+    unless @data.empty?
+      io << 'plot ' << @data.map(&:plot_args).join(', ') << "\n"
+      @data.each { |ds| io << "e\n" if ds.to_gplot(io) }
+    end
+
+    io
+  end
+
+  class DataSet
+
+    NOTITLE = 'notitle'.freeze
+
+    attr_accessor(*ARGS =
+      %w[data using axes title matrix smooth with linewidth].freeze)
+
+    def initialize(data)
+      @data = data
+      yield self if block_given?
+    end
+
+    def notitle
+      @title = NOTITLE
+    end
+
+    def plot_args
+      ARGS.map { |arg|
+        var = "@#{arg}"
+        val = instance_variable_get(var) if instance_variable_defined?(var)
+
+        case arg
+          when 'data'
+            (val.is_a?(String) ? val : "'-'")
+          when 'title'
+            (val == NOTITLE ? ' notitle' : " title '#{val}'") if val
+          when 'matrix'
+            ' matrix' if val
+          else
+            " #{arg} #{val}" if val
+        end
+      }.compact.join
+    end
+
+    def to_gplot(io)
+      @data.to_gplot(io) if @data && !@data.is_a?(String)
+    end
+
+  end
+
+  module CSV
+
+    extend self
+
+    VERSION = '0.1.0'
+
+    USAGE = "Usage: #{$0} [options] <csv>..."
+
+    DEFAULTS = {
+      aggregate:  nil,
+      comment:    nil,
+      delimiter:  ',',
+      empty:      nil,
+      height:     nil,
+      linear_fit: false,
+      max_x:      nil,
+      max_y:      nil,
+      mean:       false,
+      min_x:      nil,
+      min_y:      nil,
+      notitle:    nil,
+      range:      nil,
+      skip_lines: nil,
+      style:      'lines',
+      terminal:   'png',
+      width:      nil
+    }
+
+    def run(argv = ARGV, *plot_args, &block)
+      options = parse_options(argv); args = read(argv, options) << options
+
+      if plot_args.empty? && $stdout.tty? && cmd = File.which('display')
+        IO.popen(cmd, 'w') { |io| plot(*args, false, out: io.fileno, &block) }
+      else
+        plot(*args, *plot_args, &block)
+      end
+    end
+
+    def read(files, options = {})
+      data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
+      range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
+
+      files, opts = Array(files), {
+        headers:    true,
+        converters: :numeric,
+        col_sep:    options[:delimiter],
+        skip_lines: options[:skip_lines]
+      }
+
+      multiple = files.size > 1
+
+      files.each { |file|
+        names << name = File.basename(file, '.csv')
+
+        prefix = "#{name}:" if multiple
+
+        rows = []
+
+        if file == '-'
+          begin
+            csv = ::CSV.new($stdin, opts)
+            csv.each { |row| rows << row }
+          ensure
+            csv.close if csv
+          end
+        else
+          ::CSV.foreach(file, opts) { |row| rows << row }
+        end
+
+        unless range.nil? || rows.empty? || !range.delete(:exclude)
+          range.replace((0...rows.first.headers.size).to_a - range)
+        end
+
+        rows.each_with_index { |row, rindex|
+          row.each_with_index { |(label, value), index|
+            next unless range.nil? || range.include?(index)
+
+            case empty
+              when false then next
+              when Array then value = interpolate(rows, rindex, label, *empty)
+              else            value = empty
+            end if value.nil?
+
+            label = prefix + label if prefix
+
+            if aggregate
+              key = row.values_at(*aggregate) << label
+              seen = aggregates.key?(key)
+
+              aggregates[key] += value
+              next if seen
+
+              value = key
+            end
+
+            data[label] << value
+          }
+        }
+      }
+
+      data.each_value { |values| values.map! { |v| aggregates[v] } } if aggregate
+
+      [data, names]
+    end
+
+    def plot(data, names, options = {}, *plot_args)
+      return if data.empty?
+
+      x = options[:width]  || data.values.map(&:size).max.between(1024, 8192)
+      y = options[:height] || data.values.flatten.max.between(512, 768)
+
+      title, style, mean, fit = names.join(' / '), *options.values_at(
+        :style, :mean, :linear_fit
+      )
+
+      opts = options.map { |k, v|
+        "#{k}=#{v.inspect}" if v
+      }.compact.sort.join(', ')
+
+      title << '\n' << opts.tr('"', "'") unless opts.empty?
+
+      Plot.plot(*plot_args) { |plot|
+        plot.terminal "#{options[:terminal]} size #{x}, #{y}"
+
+        plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
+        plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
+
+        plot.title title unless options[:notitle]
+
+        post_plot = yield data, plot if block_given?
+
+        data.sort.each { |label, values|
+          plot.data(values) { |ds|
+            ds.with, ds.title = style, label
+          } unless mean == :only || fit == :only
+
+          plot.data(Array.new(values.size, values.mean)) { |ds|
+            ds.with, ds.title = 'lines', "#{label} (mean)"
+          } if mean
+
+          plot.data(values.llsq.map { |_, i| i }) { |ds|
+            ds.with, ds.title = 'lines', "#{label} (fit)"
+          } if fit
+        }
+
+        post_plot.call if post_plot.respond_to?(:call)
+      }
+    end
+
+    private
+
+    def parse_options(arguments, options = DEFAULTS)
+      option_parser(options).parse!(arguments)
+      arguments << '-' if arguments.empty?
+      options
+    end
+
+    def option_parser(options = {})
+      OptionParser.new { |opts|
+        opts.banner = USAGE
+
+        opts.separator ''
+        opts.separator 'Options:'
+
+        opts.on('-t', '--terminal TERMINAL', "Gnuplot terminal [Default: '#{options[:terminal]}']") { |t|
+          options[:terminal] = t
+        }
+
+        opts.on('-s', '--style STYLE', "Gnuplot line style [Default: '#{options[:style]}']") { |s|
+          options[:style] = s
+        }
+
+        opts.separator ''
+
+        opts.on('-T', '--notitle', "Don't add title to plot") {
+          options[:notitle] = true
+        }
+
+        opts.on('-C', '--comment COMMENT', 'Comment to add onto plot') { |c|
+          options[:comment] = c
+        }
+
+        opts.separator ''
+
+        opts.on('-r', '--range COLUMNS', "Column range (ex: '0-3,6,8') [Default: all]") { |r|
+          options[:range] = column_ranges(r)
+        }
+
+        opts.on('-a', '--aggregate COLUMNS', 'Columns to aggregate on [Default: none]') { |c|
+          options[:aggregate] = column_ranges(c)
+        }
+
+        opts.separator ''
+
+        opts.on('-S', '--skip-empty', 'Skip empty fields') {
+          options[:empty] = false
+        }
+
+        opts.on('-Z', '--zero-empty', 'Use zero for empty fields') {
+          options[:empty] = 0
+        }
+
+        opts.on('-E', '--empty INTEGER', Integer, 'Use INTEGER for empty fields') { |i|
+          options[:empty] = i
+        }
+
+        opts.on('-P', '--interpolate-empty [RANGE[:DEFAULT]]', /\A\d+(?::[\d.]+)?\z/, 'Interpolate empty fields') { |i|
+          r, d = i.split(':') if i
+          options[:empty] = [(r = r.to_i).zero? ? 1 : r, d.to_f]
+        }
+
+        opts.separator ''
+
+        opts.on('-d', '--delimiter STRING', "Field delimiter [Default: '#{options[:delimiter]}']") { |d|
+          options[:delimiter] = d
+        }
+
+        opts.on('-k', '--skip-lines REGEX', 'Skip matching lines [Default: none]') { |k|
+          options[:skip_lines] = Regexp.new(k)
+        }
+
+        opts.separator ''
+
+        opts.on('-W', '--width WIDTH', Integer, 'Terminal width [Default: auto]') { |w|
+          options[:width] = w
+        }
+
+        opts.on('-H', '--height HEIGHT', Integer, 'Terminal height [Default: auto]') { |h|
+          options[:height] = h
+        }
+
+        opts.separator ''
+
+        opts.on('-I', '--min-x MIN', Integer, 'Min x value [Default: auto]') { |i|
+          options[:min_x] = i
+        }
+
+        opts.on('-M', '--max-x MAX', Integer, 'Max x value [Default: auto]') { |m|
+          options[:max_x] = m
+        }
+
+        opts.on('-i', '--min-y MIN', Integer, 'Min y value [Default: auto]') { |i|
+          options[:min_y] = i
+        }
+
+        opts.on('-m', '--max-y MAX', Integer, 'Max y value [Default: auto]') { |m|
+          options[:max_y] = m
+        }
+
+        opts.separator ''
+
+        opts.on('-n', '--mean', "Add arithmetic mean line (ignores '-s')") {
+          options[:mean] = true
+        }
+
+        opts.on('-N', '--mean-only', "Plot arithmetic mean only (implies '-n')") {
+          options[:mean] = :only
+        }
+
+        opts.on('-l', '--linear-fit', "Add linear fit line (ignores '-s')") {
+          options[:linear_fit] = true
+        }
+
+        opts.on('-L', '--linear-fit-only', "Plot linear fit only (implies '-l')") {
+          options[:linear_fit] = :only
+        }
+
+        opts.separator ''
+        opts.separator 'Generic options:'
+
+        opts.on('-h', '--help', 'Print this help message and exit') {
+          abort opts.to_s
+        }
+
+        opts.on('--version', 'Print program version and exit') {
+          abort "#{File.basename($0)} v#{VERSION}"
+        }
+      }
+    end
+
+    def column_ranges(string)
+      a, b = [], []
+
+      string.split(',').each { |range|
+        if range =~ %r{\A(\^)?(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
+          ($1 ? b : a).concat($2.to_i.step(
+            ($3 || $2).to_i, ($4 || 1).to_i).to_a)
+        else
+          abort "Illegal range: #{range} (#{string})"
+        end
+      }
+
+      if a.empty? && !b.empty?
+        b << :exclude
+      else
+        a -= b
+        a unless a.empty?
+      end
+    end
+
+    def interpolate(rows, index, label, range, default)
+      ary = []
+
+      1.upto(range) { |i| [-1, 1].each { |s|
+        row = rows[index + (s * i)]
+        ary << (row && row[label] || default)
+      } }
+
+      rows[index][label] = ary.mean
+    end
+
+  end
+
+end
+
+Plot::CSV.run if $0 == __FILE__
