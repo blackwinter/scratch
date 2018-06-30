@@ -1,22 +1,29 @@
 #! /bin/bash
 
-c=""; i=1; u="$0 [-c <count>] [-i <interval=$i>] <PID...>"
+interval=1
+count=
+pgrep=
 
-while getopts :c:hi: opt; do
+usage="Usage: $0 [-N <count>] [-I <interval=$interval>] {<ps-args>...|-R <pgrep-args>...}"
+
+while getopts :I:N:Rh opt; do
   case "$opt" in
-    c ) c="$OPTARG";;
-    i ) i="$OPTARG";;
-    h ) echo "$u"; exit;;
+    I ) interval="$OPTARG";;
+    N ) count="$OPTARG";;
+    R ) pgrep=1;;
+    h ) echo "$usage"; exit;;
     * ) ((OPTIND--)); break;;
   esac
 done
 
 shift $((OPTIND - 1))
+[ $# -eq 0 ] && echo "$usage" && exit 1
 
-[ $# -eq 0 ] && echo "$u" && exit 1
+ps=$@
+[ -n "$pgrep" ] && until ps=$(pgrep "$@"); do :; done
 
-while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $h "$@"; do
-  [ -n "$c" ] && [ $((++j)) -ge $c ] && exit
-  sleep $i || exit 1
-  h="--no-headers"
+while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $headers $ps; do
+  [ -n "$count" ] && [ $((++j)) -ge $count ] && exit
+  sleep $interval || exit 1
+  headers=--no-headers
 done
