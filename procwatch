@@ -1,29 +1,40 @@
 #! /bin/bash
 
-interval=1
+set -o pipefail
+
 count=
-pgrep=
+file=/dev/stdout
+interval=1
+pid=
 
-usage="Usage: $0 [-N <count>] [-I <interval=$interval>] {<ps-args>...|-R <pgrep-args>...}"
+usage="Usage: $0 [-c <count>] [-i <interval=$interval>] [-o <file>] {-p <pid>|<cmd> [<arg>...]}"
 
-while getopts :I:N:Rh opt; do
+while getopts i:c:ho:p: opt; do
   case "$opt" in
-    I ) interval="$OPTARG";;
-    N ) count="$OPTARG";;
-    R ) pgrep=1;;
+    c ) count="$OPTARG";;
     h ) echo "$usage"; exit;;
-    * ) ((OPTIND--)); break;;
+    i ) interval="$OPTARG";;
+    o ) file="$OPTARG";;
+    p ) pid="$OPTARG";;
   esac
 done
 
 shift $((OPTIND - 1))
-[ $# -eq 0 ] && echo "$usage" && exit 1
 
-ps=$@
-[ -n "$pgrep" ] && until ps=$(pgrep "$@"); do :; done
+if [ -z "$pid" ]; then
+  [ $# -eq 0 ] && echo "$usage" && exit 1
 
-while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $headers $ps; do
-  [ -n "$count" ] && [ $((++j)) -ge $count ] && exit
-  sleep $interval || exit 1
+  "$@" &
+  pid=$!
+
+  trap "kill $pid" INT TERM
+  echo "$0: [$pid] $@"
+fi
+
+while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $headers $pid | sed 's/^ *//; s/ \+/,/g'; do
+  [ -n "$count" ] && [ $((++j)) -ge $count ] && break
+  sleep $interval || break
   headers=--no-headers
-done
+done >"$file"
+
+wait
