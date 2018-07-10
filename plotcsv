@@ -178,12 +178,19 @@ class Plot
         skip_lines: options[:skip_lines]
       }
 
-      multiple = files.size > 1
+      multiple, lcp = files.size > 1, nil
 
-      files.each { |file|
-        names << name = File.basename(file, '.csv')
+      files.map { |file|
+        name = File.basename(file, '.csv')
 
+        lcp = lcp.nil? ? name : lcp.each_char.with_index
+          .take_while { |c, i| c == name[i] }.map(&:first).join
+
+        [file, name]
+      }.each { |file, name|
+        name.slice!(0, lcp.length) if lcp != name
         prefix = "#{name}:" if multiple
+        names << name
 
         rows = []
 
