@@ -205,6 +205,7 @@ class Plot
       palette_offset: 0,
       range:          nil,
       skip_lines:     nil,
+      sort:           false,
       style:          'lines',
       terminal:       'png',
       width:          nil
@@ -234,7 +235,7 @@ class Plot
       multiple, lcp = files.size > 1, nil
 
       files.map { |file|
-        name = File.basename(file, '.csv')
+        name = File.basename(file, File.extname(file))
 
         lcp = lcp.nil? ? name : lcp.each_char.with_index
           .take_while { |c, i| c == name[i] }.map(&:first).join
@@ -321,7 +322,9 @@ class Plot
 
         post_plot = yield data, plot if block_given?
 
-        data.sort.each { |label, values|
+        data = data.sort_by { |label,| label } if options[:sort]
+
+        data.each { |label, values|
           plot.data(values) { |ds|
             ds.with, ds.title = style, label
           } unless mean == :only || fit == :only
@@ -377,6 +380,10 @@ class Plot
         }
 
         opts.separator ''
+
+        opts.on('-o', '--sort', 'Sort graphs by label') {
+          options[:sort] = true
+        }
 
         opts.on('-T', '--notitle', "Don't add title to plot") {
           options[:notitle] = true
