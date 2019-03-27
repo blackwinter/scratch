@@ -2,20 +2,26 @@
 
 set -o pipefail
 
+stdout=/dev/stdout
+headers=vsz,rss,sz,%mem,%cpu,time,etime,pid
+padding=' '; for i in {1..7}; do padding+=$padding; done
+
 count=
-file=/dev/stdout
+file=$stdout
 interval=1
 pid=
+watch=
 
-usage="Usage: $0 [-c <count>] [-i <interval=$interval>] [-o <file>] {-p <pid>|<cmd> [<arg>...]}"
+usage="Usage: $0 [-c <count>] [-i <interval=$interval>] [-o <file>|-w] {-p <pid>|<cmd> [<arg>...]}"
 
-while getopts i:c:ho:p: opt; do
+while getopts i:c:ho:p:w opt; do
   case "$opt" in
     c ) count="$OPTARG";;
     h ) echo "$usage"; exit;;
     i ) interval="$OPTARG";;
-    o ) file="$OPTARG";;
+    o ) file="$OPTARG"; watch=;;
     p ) pid="$OPTARG";;
+    w ) watch=-n; file=$stdout;;
   esac
 done
 
@@ -31,10 +37,18 @@ if [ -z "$pid" ]; then
   echo "$0: [$pid] $@"
 fi
 
-while ps -o vsz,rss,sz,%mem,%cpu,time,etime,pid $headers $pid | sed 's/^ *//; s/ \+/,/g'; do
+while :; do
+  res=$(ps -o $headers $noh $pid | sed 's/^ *//; s/ \+/,/g') || break
+
+  [ -n "$watch" ] && echo -n "$padding" $'\r'
+  echo $watch "$res"
+
   [ -n "$count" ] && [ $((++j)) -ge $count ] && break
   sleep $interval || break
-  headers=--no-headers
+
+  noh=--no-headers
 done >"$file"
+
+[ -n "$watch" ] && echo
 
 wait
