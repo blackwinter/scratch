@@ -1,18 +1,19 @@
 #! /usr/bin/env ruby
 
-require 'net/http'
+require 'etc'
 require 'json'
+require 'net/http'
 require 'zlib'
 
 class EsSample
 
-  DEFAULT_HOST  = 'http://localhost:9200'.freeze
-  DEFAULT_COUNT = 1
-  DEFAULT_SIZE  = 1000
-  DEFAULT_LIMIT = Float::INFINITY
-  DEFAULT_QUERY = { match_all: {} }.freeze
+  DEFAULT_HOST   = 'http://localhost:9200'.freeze
+  DEFAULT_COUNT  = 1
+  DEFAULT_SIZE   = 1000
+  DEFAULT_LIMIT  = Float::INFINITY
+  DEFAULT_QUERY  = { match_all: {} }.freeze
+  DEFAULT_SCROLL = '10s'.freeze
 
-  SCROLL      = '10s'.freeze
   SCROLL_PATH = '_search/scroll'.freeze
   GZIP_RE     = %r{\.gz(?:ip)?\z}i.freeze
   HEADER      = { 'Content-Type' => 'application/json' }.freeze
@@ -24,27 +25,106 @@ class EsSample
     }]
   }
 
-  def self.traverse(value, keys = [], *path)
-    case value
-      when Hash  then value.each { |k, v| traverse(v, keys, *path, k) }
-      when Array then value.each { |   v| traverse(v, keys, *path)    }
+  class << self
+
+    def cli(argv = ARGV, prog = $0)
+      trap(:INT) { exit 130 }
+
+      params, opts = %W[[#{help = '--help'}]], {}
+
+      flag = lambda { |short, long|
+        params << "[#{short_switch = "-#{short}"}|#{long_switch = "--#{long}"}]"
+        opts[long] = [argv.delete(short_switch), argv.delete(long_switch)].any?
+      }
+
+      opt = lambda { |key, name, multi = false, &block|
+        params << "[#{switch = "-#{key}"} <#{name.upcase}>]#{'...' if multi}"
+
+        block ||= lambda { |v| v }
+
+        values = []
+
+        while index = argv.index(switch)
+          argv.delete_at(index)
+          values << block[argv.delete_at(index)]
+        end
+
+        opts[name] = multi ? values : values.last unless values.empty?
+      }
+
+      list = lambda { |*args| opt.(*args) { |v| v.split(',') } }
+
+      opt.(:P, :parallelism) { |p| Integer(p) unless p == '-' }
+      opt.(:Q, :queuesize)   { |q| Integer(q) }
+      opt.(:S, :scroll)
+      opt.(:c, :count)       { |c| Integer(c) unless c == '-' }
+      opt.(:h, :host)        { |h| h.sub(/\/*\z/, '/') }
+      opt.(:l, :limit)       { |l| Integer(l) unless l == '-' }
+      opt.(:o, :output)
+      opt.(:q, :query)       { |q| JSON.parse(q) }
+      opt.(:s, :size)        { |s| Integer(s) }
+
+      existing = list[:e, :existing, true]
+      missing  = list[:m, :missing,  true]
+
+      if source_fields = list[:f, :source_fields] and source_fields.delete('-')
+        source_fields.concat(existing.flatten) if existing
+        source_fields.concat(missing.flatten)  if missing
+      end
+
+      list[:F, :stored_fields]
+      list[:D, :data_fields]
+
+      flag[:d, :delete]
+      flag[:p, :pretty]
+      flag[:r, :random]
+
+      if argv.empty? || argv.include?(help)
+        puts "Usage: #{prog} #{params.join(' ')} <INDEX>..."
+        exit
+      end
+
+      begin
+        yield EsSample.new(opts), argv
+      rescue => err
+        abort "ERROR: #{err} (#{err.backtrace.first})"
+      end
     end
 
-    path.empty? ? keys.sort!.tap(&:uniq!) : keys << path.join('.')
+    def traverse(value, keys = [], *path)
+      case value
+        when Hash  then value.each { |k, v| traverse(v, keys, *path, k) }
+        when Array then value.each { |   v| traverse(v, keys, *path)    }
+      end
+
+      path.empty? ? keys.sort!.tap(&:uniq!) : keys << path.join('.')
+    end
+
   end
 
   def initialize(opts = {})
     opts.each { |k, v| respond_to?(m = "#{k}=") ?
       send(m, v) : raise(ArgumentError, "invalid argument: #{k}") }
 
-    @host  ||= DEFAULT_HOST
-    @count ||= DEFAULT_COUNT
-    @size  ||= DEFAULT_SIZE
-    @limit ||= DEFAULT_LIMIT
-    @query ||= DEFAULT_QUERY
+    @host        ||= DEFAULT_HOST
+    @count       ||= DEFAULT_COUNT unless instance_variable_defined?(:@count)
+    @size        ||= DEFAULT_SIZE
+    @limit       ||= DEFAULT_LIMIT
+    @query       ||= DEFAULT_QUERY
+    @scroll      ||= DEFAULT_SCROLL
+    @parallelism ||= Etc.nprocessors unless instance_variable_defined?(:@parallelism)
+    @queuesize   ||= size
 
     @conditions = { existing => true, missing => false }.delete_if { |k,| !k }
   end
+
+  attr_accessor :count, :data_fields, :existing, :source_fields, :stored_fields,
+                :host, :limit, :missing, :output, :parallelism, :pretty,
+                :queuesize, :query, :random, :scroll, :size
+
+  attr_reader :base, :conditions, :docs, :scroll_ids, :type
+
+  attr_writer :delete
 
   def each(base, &block)
     return enum_for(__method__, base) unless block
@@ -60,11 +140,6 @@ class EsSample
     fetch_rest(*rest) if type
   end
 
-  attr_accessor :host, :count, :size, :limit, :output, :query,
-                :existing, :missing, :fields, :random, :pretty
-
-  attr_reader :conditions, :base, :type, :docs, :scroll_ids
-
   private
 
   def reset(base, *rest)
@@ -76,45 +151,93 @@ class EsSample
     q = !random ? make_query(query).tap { |r| r[:sort] = %w[_doc] } :
       make_query(function_score: { query: query, random_score: {} })
 
-    id, limit = fetch("#{base}/_search?scroll=#{SCROLL}", q, &block), self.limit
+    refresh(base)
 
-    while id && (limit -= size) > 0
-      id = fetch("#{SCROLL_PATH}?scroll=#{SCROLL}", scroll_id: id, &block)
-    end
+    async(block) { |_block|
+      id, limit = fetch("#{base}/_search?scroll=#{scroll}", q, &_block), self.limit
 
-    clear_scroll unless scroll_ids.empty?
+      while id && (limit -= size) > 0
+        id = fetch("#{SCROLL_PATH}?scroll=#{scroll}", scroll_id: id, &_block)
+      end
+
+      clear_scroll unless scroll_ids.empty?
+    }
+
+    delete(base) if @delete
   end
 
   def fetch_rest(*args)
-    args.each { |index| write(index) { |block|
-      docs.each_slice(size) { |ids| iterate(post("#{index}/_search",
-        make_query(ids: { type: type, values: ids })), &block) } } }
+    args.each { |index|
+      refresh(index)
+
+      write(index) { |block|
+        async(block) { |_block|
+          docs.each_slice(size) { |ids|
+            iterate(post("#{index}/_search",
+              make_query(ids: { type: type, values: ids })), &_block)
+          }
+        }
+      }
+
+      delete(index) if @delete
+    }
+  end
+
+  def refresh(index)
+    post("#{index}/_refresh")
+  end
+
+  def async(block)
+    return yield block unless parallelism
+
+    queue, mutex = SizedQueue.new(queuesize), Mutex.new
+
+    threads = Array.new(parallelism) { Thread.new {
+      while args = queue.pop
+        mutex.synchronize { block[*args] }
+      end
+    } }
+
+    Thread.new { yield lambda { |*args| queue << args } }.join
+
+    queue.close
+    threads.each(&:join)
   end
 
   def clear_scroll
-    uri, http = NET[host]
-
-    req = Net::HTTP::Delete.new(uri.merge(SCROLL_PATH).request_uri, HEADER)
-    req.body = { scroll_id: scroll_ids }.to_json
-
-    http.request(req)
+    delete(SCROLL_PATH, scroll_id: scroll_ids)
   end
 
   def write(index = nil, &block)
     write = lambda { |io| block[lambda { |doc|
-      hash = doc['_source'] and io.puts(dump(hash)) }] }
+      hash = doc['_source']
+      more = doc['fields'] and (hash ||= {})['_'] = more
+
+      io.puts(dump(hash)) if hash
+    }] }
 
     output == '-' ? write[$stdout] : begin
       puts name = output || "#{index || base}.jsonl"
 
       File.open(name, index && output ? 'a' : 'w') { |f|
-        name =~ GZIP_RE ? Zlib::GzipWriter.new(f).tap(&write).close : write[f]
+        name !~ GZIP_RE ? write[f] : begin
+          gz = Zlib::GzipWriter.new(f)
+          write[gz]
+        ensure
+          gz&.close
+        end
       }
     end
   end
 
   def make_query(hash)
-    { query: hash, _source: fields || true, size: size }
+    {
+      _source:          source_fields || !(data_fields || stored_fields),
+      fielddata_fields: data_fields, # ES >= 5.0: docvalue_fields
+      fields:           stored_fields,
+      query:            hash,
+      size:             size
+    }
   end
 
   def fetch(*args, &block)
@@ -142,7 +265,7 @@ class EsSample
     }.empty?
   end
 
-  def post(path, data)
+  def post(path, data = {})
     uri, http = NET[host]
     uri = uri.merge(path)
 
@@ -160,6 +283,15 @@ class EsSample
     json.key?('error') ? raise(json.inspect) : json
   end
 
+  def delete(path, body = nil)
+    uri, http = NET[host]
+
+    req = Net::HTTP::Delete.new(uri.merge(path).request_uri, HEADER)
+    req.body = body.to_json if body
+
+    http.request(req)
+  end
+
   def iterate(json, &block)
     json['hits']['hits'].sort_by { |doc| doc['_id'] }.each(&block)
   end
@@ -170,59 +302,4 @@ class EsSample
 
 end
 
-if $0 == __FILE__
-  trap(:INT) { exit 130 }
-
-  params, opts = %W[[#{help = '--help'}]], {}
-
-  flag = lambda { |short, long|
-    params << "[#{short_switch = "-#{short}"}|#{long_switch = "--#{long}"}]"
-    opts[long] = [ARGV.delete(short_switch), ARGV.delete(long_switch)].any?
-  }
-
-  opt = lambda { |key, name, multi = false, &block|
-    params << "[#{switch = "-#{key}"} <#{name.upcase}>]#{'...' if multi}"
-
-    block ||= lambda { |v| v }
-
-    values = []
-
-    while index = ARGV.index(switch)
-      ARGV.delete_at(index)
-      values << block[ARGV.delete_at(index)]
-    end
-
-    opts[name] = multi ? values : values.last unless values.empty?
-  }
-
-  list = lambda { |*args| opt.(*args) { |v| v.split(',') } }
-
-  opt.(:h, :host)  { |h| h.sub(/\/*\z/, '/') }
-  opt.(:c, :count) { |c| Integer(c) unless c == '-' }
-  opt.(:s, :size)  { |s| Integer(s) }
-  opt.(:l, :limit) { |l| Integer(l) unless l == '-' }
-  opt.(:o, :output)
-  opt.(:q, :query) { |q| JSON.parse(q) }
-
-  existing = list[:e, :existing, true]
-  missing  = list[:m, :missing,  true]
-
-  if fields = list[:f, :fields] and fields.delete('-')
-    fields.concat(existing.flatten) if existing
-    fields.concat(missing.flatten)  if missing
-  end
-
-  flag[:r, :random]
-  flag[:p, :pretty]
-
-  if ARGV.empty? || ARGV.include?(help)
-    puts "Usage: #{$0} #{params.join(' ')} <INDEX>..."
-    exit
-  end
-
-  begin
-    EsSample.new(opts).run(*ARGV)
-  rescue => err
-    abort "ERROR: #{err}"
-  end
-end
+EsSample.cli { |es, args| es.run(*args) } if $0 == __FILE__
