@@ -1,6 +1,6 @@
 #! /usr/bin/env ruby
 
-out, imp, buf, del, pkg, com = [], Hash.new { |h, k| h[k] = [] }, [], [], nil, nil
+out, imp, buf, del, pkg, com = [], Hash.new { |h, k| h[k] = [] }, [], [], '', nil
 
 ARGF.each { |line|
   out << line.dup
@@ -39,3 +39,5 @@ out.each_with_index { |line, num|
 }
 
 puts buf
+
+abort 'No package declaration!' if pkg.empty?
