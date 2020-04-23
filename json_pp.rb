@@ -13,7 +13,7 @@ if $0 == __FILE__
 
   args.each { |source| puts begin
     JSON.send(meth, source)
-  rescue ParserError => err
+  rescue JSON::ParserError => err
     warn "#{err.class}: #{err}"
     source
   end }
