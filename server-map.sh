@@ -64,6 +64,11 @@ else
   host="${entry[1]}"
   user="${entry[2]}"
 
+  if [ "$1" == "-l" ]; then
+    user=$2
+    shift 2
+  fi
+
   [ -z "$host" ] && die "no host name: $base"
   [ -z "$user" ] && die "no user name: $base"
 
@@ -99,13 +104,11 @@ else
       ssh -l "$user" "$host" "$@" -fNL "$lhost:$lport:$lhost:$rport"
       ;;
     cp2* )
-      [ -z "$1" ] && { scp --help; die; }
-
-      args=(); i=0
+      args=()
 
       while [ -n "$1" ]; do
-        args[$i]="${1/#:/$user@$host:}"
-        ((i++)); shift
+        args+=(${1/#:/$user@$host:})
+        shift
       done
 
       scp "${args[@]}"
