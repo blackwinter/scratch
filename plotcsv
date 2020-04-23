@@ -5,7 +5,7 @@
 #                                                                             #
 # plotcsv -- Plot CSV data using Gnuplot                                      #
 #                                                                             #
-# Copyright (C) 2011-2018 Jens Wille                                          #
+# Copyright (C) 2011-2019 Jens Wille                                          #
 #                                                                             #
 # Authors:                                                                    #
 #     Jens Wille <jens.wille@gmail.com>                                       #
@@ -60,6 +60,7 @@ class Plot
 
     def plot(persist = true, *args, &block)
       cmd = File.which('gnuplot') or abort 'gnuplot executable not found'
+      cmd = [cmd]; cmd << '--persist' if persist
 
       opts = args.last.is_a?(Hash) ? args.pop : {}
       IO.popen(cmd, 'w', opts) { |gp| new(gp, *args, &block) }
@@ -104,7 +105,7 @@ class Plot
     private
 
     def word_wrap(string, line_width = 110)
-      string.gsub(/(.{1,#{line_width}})(?:,\s+|$)/, "\\1\n").strip
+      string.gsub(/(.{1,#{line_width}})(?:,\s+|$)/, "\\1,\n").strip.chomp(',')
     end
 
   end
@@ -123,7 +124,7 @@ class Plot
     @colors = colors
   end
 
-  def data(*args, &block)
+  def data(args, &block)
     @data << DataSet.new(args, &block)
   end
 
@@ -194,6 +195,7 @@ class Plot
       comment:        nil,
       delimiter:      ',',
       empty:          nil,
+      functions:      [],
       height:         nil,
       linear_fit:     false,
       max_x:          nil,
@@ -207,6 +209,8 @@ class Plot
       skip_lines:     nil,
       sort:           false,
       style:          'lines',
+      sum:            nil,
+      sum_only:       false,
       terminal:       'png',
       width:          nil
     }
@@ -301,9 +305,8 @@ class Plot
       x = options[:width]  || data.values.map(&:size).max.between(1024, 8192)
       y = options[:height] || data.values.flatten.max.between(512, 768)
 
-      title, style, mean, fit = names.join(' / '), *options.values_at(
-        :style, :mean, :linear_fit
-      )
+      title, style, mean, fit, sum, sum_only = names.join(' / '),
+        *options.values_at(:style, :mean, :linear_fit, :sum, :sum_only)
 
       opts = options.map { |k, v|
         "#{k}=#{v.inspect}" if v
@@ -324,10 +327,12 @@ class Plot
 
         data = data.sort_by { |label,| label } if options[:sort]
 
-        data.each { |label, values|
+        sum_label, sum_values = [], [] if sum
+
+        data.each_with_index { |(label, values), column_index|
           plot.data(values) { |ds|
             ds.with, ds.title = style, label
-          } unless mean == :only || fit == :only
+          } unless mean == :only || fit == :only || sum_only
 
           plot.data(Array.new(values.size, values.mean)) { |ds|
             ds.with, ds.title = 'lines', "#{label} (mean)"
@@ -336,6 +341,25 @@ class Plot
           plot.data(values.llsq.map { |_, i| i }) { |ds|
             ds.with, ds.title = 'lines', "#{label} (fit)"
           } if fit
+
+          if sum && sum.include?(column_index)
+            sum_label << label
+
+            values.each_with_index { |value, row_index|
+              sum_values[row_index] ||= 0
+              sum_values[row_index] += value if value
+            }
+          end
+        }
+
+        plot.data(sum_values) { |ds|
+          ds.with, ds.title = 'lines', sum_label.join(' + ')
+        } if sum
+
+        options[:functions].each { |function|
+          plot.data(function) { |ds|
+            ds.with, ds.title = 'lines', function
+          }
         }
 
         post_plot.call if post_plot.respond_to?(:call)
@@ -478,6 +502,21 @@ class Plot
           options[:linear_fit] = :only
         }
 
+        opts.on('-u', '--sum COLUMNS', "Add sum line (ignores '-s')") { |s|
+          options[:sum] = column_ranges(s)
+        }
+
+        opts.on('-U', '--sum-only COLUMNS', "Plot sum only (implies '-u')") { |s|
+          options[:sum] = column_ranges(s)
+          options[:sum_only] = true
+        }
+
+        opts.separator ''
+
+        opts.on('-F', '--function FUNCTION', 'Plot FUNCTION') { |f|
+          options[:functions] << f
+        }
+
         opts.separator ''
         opts.separator 'Generic options:'
 
@@ -501,11 +540,13 @@ class Plot
       a, b = [], []
 
       string.split(',').each { |range|
-        if range =~ %r{\A(\^)?(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
-          ($1 ? b : a).concat($2.to_i.step(
-            ($3 || $2).to_i, ($4 || 1).to_i).to_a)
-        else
-          abort "Illegal range: #{range} (#{string})"
+        case range
+          when '-' then a.push(*0..1024)
+          when %r{\A(\^)?(\d+)(?:-(\d+)(?:/(\d+))?)?\z}
+            ($1 ? b : a).concat($2.to_i.step(
+              ($3 || $2).to_i, ($4 || 1).to_i).to_a)
+          else
+            abort "Illegal range: #{range} (#{string})"
         end
       }
 
