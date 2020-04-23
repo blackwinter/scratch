@@ -1,9 +1,8 @@
 #! /usr/bin/env ruby
 
-gem 'blackwinter-gnuplot'
-require 'gnuplot'
+load File.join(__dir__, 'plotcsv')
 
-Gnuplot.plot { |plot|
+Plot.plot { |plot|
   plot.xrange ARGV.shift if ARGV.first =~ /\A\[(?:-?\d+)?:(?:-?\d+)?\]\z/
 
   ARGV.each { |function| plot.data(function) { |ds|
