@@ -1,0 +1,28 @@
+#! /bin/bash
+
+konsole 2>/dev/null &
+
+q="qdbus org.kde.konsole-$!"; s="sleep 0.1"; i=0
+until $q &>/dev/null || [ $i -gt 100 ]; do $s; ((i++)); done
+
+function run() {
+  [ -n "$2" ] && $q /Sessions/$1 runCommand "$2"
+}
+
+d=${SPLIT_KONSOLE:-left-right}; i=$#
+while [ $((i--)) -gt 0 ]; do
+  $q /konsole/MainWindow_1 activateAction split-view-$d >/dev/null
+  $s
+done
+
+run 1 exit
+
+while [ $# -gt 0 ]; do
+  # The D-Bus methods sendText/runCommand were just used. There are security
+  # concerns about allowing these methods to be public. If desired, these
+  # methods can be changed to internal use only by re-compiling Konsole.
+  # This warning will only show once for this Konsole instance.
+  run $(($#+1)) "$1"
+  shift
+  $s
+done
