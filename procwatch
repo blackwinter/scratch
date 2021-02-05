@@ -4,7 +4,7 @@ set -o pipefail
 
 stdout=/dev/stdout
 headers=vsz,rss,sz,%mem,%cpu,time,etime,pid
-padding=' '; for i in {1..7}; do padding+=$padding; done
+padding=; for i in {1..$COLUMNS}; do padding+=' '; done
 
 count=
 file=$stdout
@@ -39,6 +39,9 @@ fi
 
 while :; do
   res=$(ps -o $headers $noh $pid | sed 's/^ *//; s/ \+/,/g') || break
+
+  [ -z "$noh" ] && res=$(sed '1s/^/EPOCH,/' <<<"$res")
+  res=$(sed '$s/^/'"$(date +%s)"',/' <<<"$res")
 
   [ -n "$watch" ] && echo -n "$padding" $'\r'
   echo $watch "$res"
