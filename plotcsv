@@ -5,7 +5,7 @@
 #                                                                             #
 # plotcsv -- Plot CSV data using Gnuplot                                      #
 #                                                                             #
-# Copyright (C) 2011-2019 Jens Wille                                          #
+# Copyright (C) 2011-2020 Jens Wille                                          #
 #                                                                             #
 # Authors:                                                                    #
 #     Jens Wille <jens.wille@gmail.com>                                       #
@@ -190,29 +190,32 @@ class Plot
     USAGE = "Usage: #{$0} [options] <csv>..."
 
     DEFAULTS = {
-      aggregate:      nil,
-      colors:         [],
-      comment:        nil,
-      delimiter:      ',',
-      empty:          nil,
-      functions:      [],
-      height:         nil,
-      linear_fit:     false,
-      max_x:          nil,
-      max_y:          nil,
-      mean:           false,
-      min_x:          nil,
-      min_y:          nil,
-      notitle:        nil,
-      palette_offset: 0,
-      range:          nil,
-      skip_lines:     nil,
-      sort:           false,
-      style:          'lines',
-      sum:            nil,
-      sum_only:       false,
-      terminal:       'png',
-      width:          nil
+      aggregate:        nil,
+      background_color: '#f0f0f0',
+      colors:           [],
+      comment:          nil,
+      delimiter:        ',',
+      empty:            nil,
+      functions:        [],
+      height:           nil,
+      linear_fit:       false,
+      max_x:            nil,
+      max_y:            nil,
+      mean:             false,
+      min_x:            nil,
+      min_y:            nil,
+      notitle:          nil,
+      palette_offset:   0,
+      range:            nil,
+      skip_lines:       nil,
+      sort:             false,
+      style:            'lines',
+      sum:              nil,
+      sum_only:         false,
+      terminal:         'png',
+      width:            nil,
+      x_arrows:         [],
+      y_arrows:         []
     }
 
     def run(argv = ARGV, *plot_args, &block)
@@ -227,7 +230,7 @@ class Plot
 
     def read(files, options = {})
       data, aggregates, names = Hash.new { |h, k| h[k] = [] }, Hash.new(0), []
-      range, aggregate, empty = options.values_at(:range, :aggregate, :empty)
+      ranges, aggregate, empty = options.values_at(:range, :aggregate, :empty)
 
       files, opts = Array(files), {
         headers:    true,
@@ -236,7 +239,7 @@ class Plot
         skip_lines: options[:skip_lines]
       }
 
-      multiple, lcp = files.size > 1, nil
+      multiple, lcp, range = files.size > 1, nil, nil
 
       files.map { |file|
         name = File.basename(file, File.extname(file))
@@ -254,14 +257,16 @@ class Plot
 
         if file == '-'
           begin
-            csv = ::CSV.new($stdin, opts)
+            csv = ::CSV.new($stdin, **opts)
             csv.each { |row| rows << row }
           ensure
             csv.close if csv
           end
         else
-          ::CSV.foreach(file, opts) { |row| rows << row }
+          ::CSV.foreach(file, **opts) { |row| rows << row }
         end
+
+        range = ranges.shift if ranges && !ranges.empty?
 
         unless range.nil? || rows.empty? || !range.delete(:exclude)
           range.replace((0...rows.first.headers.size).to_a - range)
@@ -273,6 +278,7 @@ class Plot
 
             case empty
               when false then next
+              when true  then value = interpolate_linear(rows, rindex, label)
               when Array then value = interpolate(rows, rindex, label, *empty)
               else            value = empty
             end if value.nil?
@@ -316,6 +322,8 @@ class Plot
 
       Plot.plot(*plot_args) { |plot|
         plot.terminal "#{options[:terminal]} size #{x}, #{y}"
+
+        plot.object "rectangle from graph 0,0 to graph 1,1 behind fillcolor rgb '#{options[:background_color]}'"
 
         plot.xrange "[#{options[:min_x]}:#{options[:max_x]}]"
         plot.yrange "[#{options[:min_y]}:#{options[:max_y]}]"
@@ -362,6 +370,14 @@ class Plot
           }
         }
 
+        options[:x_arrows].each { |arrow, color|
+          plot.arrow "from first #{arrow},graph 0 to first #{arrow},graph 1 nohead linecolor rgb '#{color}'"
+        }
+
+        options[:y_arrows].each { |arrow, color|
+          plot.arrow "from graph 0,first #{arrow} to graph 1,first #{arrow} nohead linecolor rgb '#{color}'"
+        }
+
         post_plot.call if post_plot.respond_to?(:call)
       }
     end
@@ -391,16 +407,20 @@ class Plot
 
         opts.separator ''
 
-        opts.on('-c', '--colors COLORS', "Line style colors (ex: '#FF0000,#00FF00,#0000FF')") { |c|
-          options[:colors] = Plot.colors(*c.split(',').map(&:strip))
+        opts.on('-c', '--colors COLORS', "Line style colors (ex: '#ff0000,#00ff00,#0000ff')") { |c|
+          options[:colors].concat(Plot.colors(*c.split(',').map(&:strip)))
         }
 
         opts.on('-p', '--palette PALETTE', "Line style palette (See 'Available palettes' below)") { |p|
-          options[:colors] = Plot.palette_colors(p)
+          options[:colors].concat(Plot.palette_colors(p))
         }
 
         opts.on('-O', '--palette-offset INTEGER', 'Skip INTEGER palette colors') { |o|
           options[:palette_offset] = Integer(o)
+        }
+
+        opts.on('-B', '--background-color COLOR', "Graph background color [Default: '#{options[:background_color]}']") { |b|
+          options[:background_color] = Plot.colors(b).first
         }
 
         opts.separator ''
@@ -420,7 +440,7 @@ class Plot
         opts.separator ''
 
         opts.on('-r', '--range COLUMNS', "Column range (ex: '0-3,6,8') [Default: all]") { |r|
-          options[:range] = column_ranges(r)
+          (options[:range] ||= []) << column_ranges(r)
         }
 
         opts.on('-a', '--aggregate COLUMNS', 'Columns to aggregate on [Default: none]') { |c|
@@ -444,6 +464,10 @@ class Plot
         opts.on('-P', '--interpolate-empty [RANGE[:DEFAULT]]', /\A\d+(?::[\d.]+)?\z/, 'Interpolate empty fields') { |i|
           r, d = i.split(':') if i
           options[:empty] = [(r = r.to_i).zero? ? 1 : r, d.to_f]
+        }
+
+        opts.on('-R', '--linear-empty', 'Interpolate empty fields linearly') {
+          options[:empty] = true
         }
 
         opts.separator ''
@@ -513,6 +537,16 @@ class Plot
 
         opts.separator ''
 
+        opts.on('-X', '--x-arrow ARROW[:COLOR]', 'Plot ARROW') { |a|
+          a, c = a.split(':')
+          options[:x_arrows] << [a, *Plot.colors(c || 'black')]
+        }
+
+        opts.on('-Y', '--y-arrow ARROW[:COLOR]', 'Plot ARROW') { |a|
+          a, c = a.split(':')
+          options[:y_arrows] << [a, *Plot.colors(c || 'black')]
+        }
+
         opts.on('-F', '--function FUNCTION', 'Plot FUNCTION') { |f|
           options[:functions] << f
         }
@@ -567,6 +601,25 @@ class Plot
       } }
 
       rows[index][label] = ary.mean
+    end
+
+    def interpolate_linear(rows, index, label)
+      x1 = x2 = y1 = y2 = 0
+
+      index.downto(0) { |i|
+        x1, v = i, rows[i][label]
+        break y1 = v if v
+      }
+
+      index.upto(rows.size - 1) { |i|
+        x2, v = i, rows[i][label]
+        break y2 = v if v
+      }
+
+      m = (y2 - y1).fdiv(x2 - x1)
+      b = y1 - x1 * m
+
+      rows[index][label] = m * index + b
     end
 
   end
