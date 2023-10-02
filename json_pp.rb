@@ -5,16 +5,32 @@ require 'nuggets/json/canonical'
 
 if $0 == __FILE__
   if ARGV.include?('-h') || ARGV.include?('--help')
-    abort "Usage: #{$0} [-h|--help] [-l|--lines] [-c|--canon] [SOURCE...]"
+    abort "Usage: #{$0} [-h|--help] [{-l|--lines}|{-r|--records}] [-c|--canonical] [SOURCE...]"
   end
 
-  meth = ARGV.delete('--canon') || ARGV.delete('-c') ? :pc : :pp
-  args = ARGV.delete('--lines') || ARGV.delete('-l') ? ARGF : [ARGF.read]
+  method = ARGV.delete('--canonical') || ARGV.delete('-c') ? :pc : :pp
 
-  args.each { |source| puts begin
-    JSON.send(meth, source)
+  print = ->(source) { puts begin
+    JSON.send(method, source)
   rescue JSON::ParserError => err
     warn "#{err.class}: #{err}"
     source
   end }
+
+  if ARGV.delete('--records') || ARGV.delete('-r')
+    record = ''
+
+    ARGF.each { |line|
+      record << line
+
+      if /\A}/.match?(line)
+        print[record]
+        record.clear
+      end
+    }
+  elsif ARGV.delete('--lines') || ARGV.delete('-l')
+    ARGF.each(&print)
+  else
+    print[ARGF.read]
+  end
 end
